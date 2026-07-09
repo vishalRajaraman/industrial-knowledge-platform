@@ -1,0 +1,54 @@
+# MCP Server — Unified InduStreakAI
+# ─── Core framework ───────────────────────────────────────────────────────────
+mcp[cli]>=1.9.0
+fastmcp>=2.3.0
+uvicorn[standard]>=0.29.0
+starlette>=0.41.0
+
+# ─── LLM clients ──────────────────────────────────────────────────────────────
+httpx>=0.27.0
+groq>=0.11.0                          # Primary free-tier LLM
+
+# ─── Embeddings (local, no API key) ───────────────────────────────────────────
+--extra-index-url https://download.pytorch.org/whl/cpu
+sentence-transformers>=3.0.0          # nomic-embed-text-v1.5, 1536-dim
+torch>=2.3.0                          # CPU-only is fine for embedding
+
+# ─── Vector DB — Qdrant Cloud ─────────────────────────────────────────────────
+qdrant-client>=1.9.0                  # Cloud-hosted, free cluster
+
+# ─── Knowledge Graph — Neo4j AuraDB ───────────────────────────────────────────
+neo4j>=5.20.0                         # Async driver for AuraDB
+
+# ─── Object Storage — AWS S3 ──────────────────────────────────────────────────
+boto3>=1.34.0                         # S3 + SQS (S3 event notifications)
+
+# ─── Document parsing ─────────────────────────────────────────────────────────
+PyMuPDF>=1.24.0                       # PDF text extraction (fitz)
+pdfplumber>=0.11.0                    # Table extraction from PDFs
+openpyxl>=3.1.0                       # Excel (.xlsx) reading
+pandas>=2.2.0                         # CSV + dataframe operations
+
+# ─── OCR & Computer Vision ────────────────────────────────────────────────────
+pytesseract>=0.3.10                   # Tesseract OCR Python wrapper
+opencv-python-headless>=4.9.0         # OpenCV (headless for server)
+Pillow>=10.3.0                        # Image I/O
+
+# NOTE: Tesseract binary must be installed separately:
+# Windows: https://github.com/UB-Mannheim/tesseract/wiki
+# Linux: apt install tesseract-ocr
+
+# ─── P&ID parsing (optional YOLO) ─────────────────────────────────────────────
+# ultralytics>=8.2.0                  # Uncomment after fine-tuning YOLOv8
+# NOTE: Fine-tune required — see post-execution checklist
+
+# ─── NLP / NER ────────────────────────────────────────────────────────────────
+spacy>=3.7.0                          # spaCy NER pipeline
+# After install: python -m spacy download en_core_web_sm
+# NOTE: Industrial NER fine-tuning is a separate step — see checklist
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+pydantic>=2.7.0
+asyncio-throttle>=1.0.2               # Rate limiting for LLM calls
+python-dateutil>=2.9.0               # Date parsing

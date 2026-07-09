@@ -1,0 +1,22 @@
+{
+  "name": "InduStreakAI — Industrial Knowledge Brain",
+  "short_name": "InduStreakAI",
+  "description": "Unified Industrial Knowledge Intelligence Platform — Asset Brain for refineries and process plants",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0e17",
+  "theme_color": "#38bdf8",
+  "orientation": "any",
+  "scope": "/",
+  "lang": "en",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Ask Copilot", "url": "/chat", "description": "Expert Knowledge Copilot" },
+    { "name": "Upload Document", "url": "/upload", "description": "Ingest new documents" },
+    { "name": "Compliance Check", "url": "/compliance", "description": "Regulatory compliance audit" }
+  ],
+  "categories": ["productivity", "business", "utilities"]
+}
