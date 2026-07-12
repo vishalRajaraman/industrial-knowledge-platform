@@ -1,137 +1,180 @@
 """
-LLM Client — Groq (primary free-tier) → Google AI Studio → OpenRouter → Ollama fallback.
-Supports both streaming and JSON-mode responses.
+LLM Client — GLM-5.2 via NVIDIA NIM API (OpenAI-compatible).
+Single brain. No fallbacks. Streaming + JSON-mode supported.
 """
 import json
 import logging
 import os
-from typing import Any, AsyncGenerator
 
-import httpx
+from openai import AsyncOpenAI
 
 logger = logging.getLogger("ikp.llm")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+LLM_MODEL = os.getenv("LLM_MODEL", "mistralai/mistral-medium-3.5-128b")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.4"))
+LLM_TOP_P = float(os.getenv("LLM_TOP_P", "0.91"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "16384"))
+LLM_SEED = int(os.getenv("LLM_SEED", "42"))
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash-lite")
-
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
-
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+# ── Singleton async client (reused across calls) ──────────────────────────────
+_client: AsyncOpenAI | None = None
 
 
-async def _groq_chat(messages: list[dict], temperature: float = 0.3, json_mode: bool = False) -> str | None:
-    if not GROQ_API_KEY:
-        return None
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload: dict[str, Any] = {
-        "model": GROQ_MODEL,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": 4096,
-    }
-    if json_mode:
-        payload["response_format"] = {"type": "json_object"}
-    try:
-        async with httpx.AsyncClient(timeout=60) as c:
-            resp = await c.post(f"{GROQ_BASE_URL}/chat/completions", headers=headers, json=payload)
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        logger.warning("Groq failed: %s", e)
-        return None
+def _get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        if not NVIDIA_API_KEY:
+            raise RuntimeError(
+                "NVIDIA_API_KEY is not set. Add it to your .env file.\n"
+                "Get your key from: https://build.nvidia.com"
+            )
+        _client = AsyncOpenAI(
+            base_url=NVIDIA_BASE_URL,
+            api_key=NVIDIA_API_KEY,
+        )
+    return _client
 
 
-async def _google_chat(messages: list[dict], temperature: float = 0.3) -> str | None:
-    if not GOOGLE_API_KEY:
-        return None
-    # Convert OpenAI format → Google Gemini format
-    contents = []
-    for m in messages:
-        role = "user" if m["role"] in ("user", "system") else "model"
-        contents.append({"role": role, "parts": [{"text": m["content"]}]})
-    payload = {"contents": contents, "generationConfig": {"temperature": temperature, "maxOutputTokens": 4096}}
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GOOGLE_MODEL}:generateContent?key={GOOGLE_API_KEY}"
-    try:
-        async with httpx.AsyncClient(timeout=60) as c:
-            resp = await c.post(url, json=payload)
-            resp.raise_for_status()
-            return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-        logger.warning("Google AI Studio failed: %s", e)
-        return None
-
-
-async def _ollama_chat(messages: list[dict], temperature: float = 0.3) -> str | None:
-    payload = {"model": OLLAMA_MODEL, "messages": messages, "stream": False,
-               "options": {"temperature": temperature}}
-    try:
-        async with httpx.AsyncClient(timeout=120) as c:
-            resp = await c.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
-            resp.raise_for_status()
-            return resp.json()["message"]["content"]
-    except Exception as e:
-        logger.warning("Ollama failed: %s", e)
-        return None
-
+# ── Core chat function ────────────────────────────────────────────────────────
 
 async def chat(
     prompt: str,
     system: str = "",
-    temperature: float = 0.3,
+    temperature: float | None = None,
 ) -> str:
-    """Multi-tier LLM chat — Groq → Google AI Studio → Ollama."""
-    messages = []
+    """
+    Send a prompt to GLM-5.2 and return the full response text.
+
+    Args:
+        prompt:      The user message / query.
+        system:      Optional system instruction to set model behaviour.
+        temperature: Override default temperature (0.4) if needed.
+
+    Returns:
+        The model's response as a plain string.
+
+    Raises:
+        RuntimeError: If NVIDIA_API_KEY is missing.
+        Exception:    Propagates API errors so callers can handle them.
+    """
+    client = _get_client()
+    messages: list[dict] = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    for fn in (_groq_chat, _google_chat, _ollama_chat):
-        result = await fn(messages, temperature=temperature)
-        if result:
-            return result
+    try:
+        completion = await client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=messages,
+            temperature=temperature if temperature is not None else LLM_TEMPERATURE,
+            top_p=LLM_TOP_P,
+            max_tokens=LLM_MAX_TOKENS,
+            seed=LLM_SEED,
+            stream=False,   # non-streaming for synchronous agent calls
+        )
+        return completion.choices[0].message.content or ""
+    except Exception as e:
+        logger.error("GLM-5.2 (NVIDIA) call failed: %s", e)
+        raise
 
-    return "⚠️ All LLM providers unavailable. Check API keys and Ollama."
 
+# ── Streaming chat ────────────────────────────────────────────────────────────
+
+async def stream_chat(
+    prompt: str,
+    system: str = "",
+    temperature: float | None = None,
+):
+    """
+    Async generator that yields response tokens as they arrive.
+    Use this for the /query/stream endpoint.
+
+    Usage:
+        async for token in stream_chat("your prompt"):
+            print(token, end="", flush=True)
+    """
+    client = _get_client()
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    try:
+        stream = await client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=messages,
+            temperature=temperature if temperature is not None else LLM_TEMPERATURE,
+            top_p=LLM_TOP_P,
+            max_tokens=LLM_MAX_TOKENS,
+            seed=LLM_SEED,
+            stream=True,
+        )
+        async for chunk in stream:
+            # Guard 1: must be a streaming chunk object, not a raw dict
+            if not hasattr(chunk, "choices"):
+                continue
+            # Guard 2: must have at least one choice
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            # Guard 3: skip finish chunks (finish_reason='stop', delta.content is None)
+            if getattr(choice, "finish_reason", None) is not None:
+                continue
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+            content = getattr(delta, "content", None)
+            if content is not None:
+                yield content
+    except Exception as e:
+        logger.error("Mistral streaming failed: %s", e)
+        raise
+
+
+# ── JSON-mode chat ────────────────────────────────────────────────────────────
 
 async def json_chat(
     prompt: str,
     system: str = "",
     temperature: float = 0.1,
 ) -> dict | None:
-    """Chat with JSON output mode — tries Groq JSON mode first."""
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    """
+    Request a structured JSON response from GLM-5.2.
+    Appends a strict JSON instruction to the prompt and strips markdown fences.
 
-    # Try Groq with JSON mode
-    text = await _groq_chat(messages, temperature=temperature, json_mode=True)
-    if not text:
-        # Fallback: add JSON instruction and use standard chat
-        messages[-1]["content"] += "\n\nRespond ONLY with valid JSON, no explanation."
-        text = await _google_chat(messages, temperature=temperature)
-    if not text:
-        text = await _ollama_chat(messages, temperature=temperature)
+    Args:
+        prompt:      The query. Include the desired JSON schema in your prompt.
+        system:      Optional system context.
+        temperature: Low temperature (0.1) for deterministic JSON output.
 
-    if not text:
+    Returns:
+        Parsed dict, or None if parsing fails.
+    """
+    json_instruction = "\n\nRespond ONLY with valid JSON. No explanation, no markdown fences, no extra text."
+    full_prompt = prompt + json_instruction
+
+    try:
+        raw = await chat(full_prompt, system=system, temperature=temperature)
+    except Exception as e:
+        logger.error("json_chat: LLM call failed: %s", e)
         return None
 
-    # Parse JSON
+    # ── Strip markdown fences if the model wraps anyway ──────────────────────
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        parts = cleaned.split("```")
+        # parts[1] is the content between first pair of fences
+        inner = parts[1]
+        if inner.startswith("json"):
+            inner = inner[4:]
+        cleaned = inner.strip()
+
     try:
-        # Strip markdown fences if present
-        cleaned = text.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("```")[1]
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
-        return json.loads(cleaned.strip())
+        return json.loads(cleaned)
     except json.JSONDecodeError as e:
-        logger.error("JSON parse failed: %s | text: %s", e, text[:200])
+        logger.error("json_chat: JSON parse failed — %s | raw: %s", e, raw[:300])
         return None

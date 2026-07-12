@@ -7,7 +7,7 @@ starlette>=0.41.0
 
 # ─── LLM clients ──────────────────────────────────────────────────────────────
 httpx>=0.27.0
-groq>=0.11.0                          # Primary free-tier LLM
+openai>=1.40.0                          # NVIDIA NIM API (GLM-5.2 brain)
 
 # ─── Embeddings (local, no API key) ───────────────────────────────────────────
 --extra-index-url https://download.pytorch.org/whl/cpu
