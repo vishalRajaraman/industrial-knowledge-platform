@@ -1,70 +1,136 @@
 """
-Embedding core — nomic-ai/nomic-embed-text-v1.5 (768-dim) OR
-                 OpenAI text-embedding-3-small (1536-dim, API key free tier).
+Embedding core — Cohere embed-multilingual-v3.0 (1024-dim).
 
-EMBEDDING_DIM env var controls which model is used.
-Default: 1536 with nomic-embed-text-v1.5-matryoshka (supports variable dim).
+Why Cohere instead of local nomic-embed-text:
+  - Cloud API → no GPU/CPU load on the deployment server
+  - embed-multilingual-v3.0 supports 100+ languages including Hindi
+    (critical for Indian industrial docs with bilingual field notes)
+  - 1024-dim vectors → richer semantic representation than 768-dim
+  - Input type separation: 'search_document' vs 'search_query' (asymmetric)
 
-NOTE: nomic-embed-text-v1.5 natively supports Matryoshka truncation,
-so you can use 768, 1024, or 1536 dim from the SAME model by slicing.
-We default to 1536 for richer semantic representation.
+API reference: https://docs.cohere.com/reference/embed
+Free tier: 1000 API calls/month (sufficient for dev + demo)
+
+EMBEDDING_DIM must be 1024 — this matches the Qdrant Cloud collection size.
+Changing this requires wiping and recreating the Qdrant collection.
 """
 import logging
 import os
-from typing import Union
+import time
+
+import cohere
 
 logger = logging.getLogger("ikp.embeddings")
 
-EMBED_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
+# ── Config ────────────────────────────────────────────────────────────────────
+COHERE_API_KEY: str = os.getenv("COHERE_API_KEY", "")
+EMBED_MODEL_NAME: str = os.getenv("EMBEDDING_MODEL", "embed-multilingual-v3.0")
+EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1024"))
+EMBED_BATCH_SIZE: int = int(os.getenv("EMBED_BATCH_SIZE", "96"))  # Cohere max batch = 96
 
-_model = None
+# ── Singleton client ──────────────────────────────────────────────────────────
+_client: cohere.Client | None = None
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-        logger.info("Loading embedding model: %s (dim=%d)", EMBED_MODEL_NAME, EMBEDDING_DIM)
-        _model = SentenceTransformer(EMBED_MODEL_NAME, trust_remote_code=True)
-        logger.info("Embedding model loaded.")
-    return _model
+def _get_client() -> cohere.Client:
+    global _client
+    if _client is None:
+        if not COHERE_API_KEY:
+            raise RuntimeError(
+                "COHERE_API_KEY is not set. Add it to your .env file.\n"
+                "Get a free key at: https://dashboard.cohere.com/api-keys"
+            )
+        _client = cohere.Client(api_key=COHERE_API_KEY)
+        logger.info(
+            "Cohere client initialised — model=%s dim=%d",
+            EMBED_MODEL_NAME,
+            EMBEDDING_DIM,
+        )
+    return _client
 
 
 def embed_documents(texts: list[str]) -> list[list[float]]:
     """
-    Embed a batch of document texts.
-    Uses 'search_document:' prefix per nomic-embed-text spec.
-    Returns 1536-dim (or EMBEDDING_DIM) normalized float vectors.
+    Embed a batch of document texts for storage in Qdrant.
+
+    Uses input_type='search_document' — Cohere's asymmetric embedding:
+    Documents and queries are embedded differently so that a query vector
+    points towards its most relevant documents in the vector space.
+
+    Handles Cohere's 96-text batch limit internally — you can pass any
+    number of texts and they will be chunked automatically.
+
+    Args:
+        texts: List of raw text strings. Do NOT add any prefix manually.
+
+    Returns:
+        List of 1024-dimensional float vectors, one per input text.
+        Already normalised for cosine similarity.
     """
-    model = _get_model()
-    prefixed = [f"search_document: {t}" for t in texts]
-    vecs = model.encode(
-        prefixed,
-        batch_size=32,
-        normalize_embeddings=True,
-        show_progress_bar=False,
-        # Matryoshka truncation: only available via encode_multi_process or direct slice
-    )
-    # Slice to target dimension (Matryoshka truncation)
-    return [v.tolist()[:EMBEDDING_DIM] for v in vecs]
+    if not texts:
+        return []
+
+    client = _get_client()
+    all_embeddings: list[list[float]] = []
+
+    # Chunk into Cohere's 96-text batch limit
+    for i in range(0, len(texts), EMBED_BATCH_SIZE):
+        batch = texts[i: i + EMBED_BATCH_SIZE]
+        try:
+            response = client.embed(
+                texts=batch,
+                model=EMBED_MODEL_NAME,
+                input_type="search_document",   # MUST be 'search_document' for stored chunks
+                embedding_types=["float"],
+            )
+            all_embeddings.extend(response.embeddings.float)
+        except Exception as e:
+            logger.error("Cohere embed (documents) failed for batch %d: %s", i // EMBED_BATCH_SIZE, e)
+            raise
+
+    return all_embeddings
 
 
 def embed_query(text: str) -> list[float]:
     """
-    Embed a single query string.
-    Uses 'search_query:' prefix — different from document prefix per nomic spec.
+    Embed a single user query for similarity search against Qdrant.
+
+    Uses input_type='search_query' — DIFFERENT from embed_documents().
+    Cohere's v3 models are trained with asymmetric input types:
+      - 'search_document' is used when storing chunks (at ingestion time)
+      - 'search_query'    is used when searching  (at query time)
+    Mixing them reduces retrieval quality significantly.
+
+    Args:
+        text: The user's raw query string (no prefix needed).
+
+    Returns:
+        Single 1024-dimensional float vector.
     """
-    model = _get_model()
-    vec = model.encode(
-        f"search_query: {text}",
-        normalize_embeddings=True,
-    )
-    return vec.tolist()[:EMBEDDING_DIM]
+    client = _get_client()
+    try:
+        response = client.embed(
+            texts=[text],
+            model=EMBED_MODEL_NAME,
+            input_type="search_query",    # MUST be 'search_query' for queries
+            embedding_types=["float"],
+        )
+        return response.embeddings.float[0]
+    except Exception as e:
+        logger.error("Cohere embed (query) failed: %s", e)
+        raise
 
 
-def embed_batch(texts: list[str], is_query: bool = False) -> list[list[float]]:
-    """Generic batch embed."""
-    if is_query:
-        return [embed_query(t) for t in texts]
-    return embed_documents(texts)
+def get_embedding_info() -> dict:
+    """Return metadata about the embedding configuration for health checks."""
+    return {
+        "provider": "cohere",
+        "model": EMBED_MODEL_NAME,
+        "dim": EMBEDDING_DIM,
+        "batch_size": EMBED_BATCH_SIZE,
+        "api_key_set": bool(COHERE_API_KEY),
+        "input_types": {
+            "documents": "search_document",
+            "queries": "search_query",
+        },
+    }

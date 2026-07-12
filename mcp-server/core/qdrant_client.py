@@ -1,8 +1,7 @@
 """
-Core client — Qdrant Cloud (cloud-hosted vector DB, 1536-dim embeddings).
-Replaces self-hosted Qdrant / ChromaDB with Qdrant Cloud free cluster.
-Embedding dimension upgraded to 1536 (text-embedding-3-small compatible)
-or 768 (nomic-embed-text-v1.5) based on EMBEDDING_DIM env var.
+Core client — Qdrant Cloud (cloud-hosted vector DB).
+Embedding provider: Cohere embed-multilingual-v3.0 (1024-dim).
+Dimension is read from EMBEDDING_DIM env var (default: 1024).
 """
 import asyncio
 import os
@@ -24,7 +23,7 @@ from qdrant_client.models import (
 QDRANT_URL = os.getenv("QDRANT_URL")           # e.g. https://xxxx.cloud.qdrant.io
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")   # from Qdrant Cloud dashboard
 DEFAULT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ikp_documents")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))   # upgraded from 384/768
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))    # Cohere embed-multilingual-v3.0 native dim
 
 if not QDRANT_URL or not QDRANT_API_KEY:
     raise EnvironmentError(
