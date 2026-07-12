@@ -12,7 +12,7 @@ def register(mcp: FastMCP):
     async def vector_upsert(chunks: list[dict], collection: str | None = None) -> dict:
         """
         Store document chunks with embeddings in Qdrant Cloud (cloud-hosted vector DB).
-        Chunks must have 'embedding' field (1536-dim float list) from generate_embeddings tool.
+        Chunks must have 'embedding' field (1024-dim float list) from generate_embeddings tool.
 
         Args:
             chunks: List of chunk dicts with 'embedding' and metadata fields.
@@ -35,7 +35,7 @@ def register(mcp: FastMCP):
         Returns top-k most similar chunks with their metadata and similarity scores.
 
         Args:
-            query_embedding: Query vector (1536-dim, from generate_embeddings with is_query=True).
+            query_embedding: Query vector (1024-dim, from generate_embeddings with is_query=True).
             top_k: Number of results to return (default: 10).
             filter: Optional metadata filter conditions (dict of field→value).
             collection: Qdrant collection name.

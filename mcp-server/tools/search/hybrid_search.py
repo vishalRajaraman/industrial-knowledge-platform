@@ -28,7 +28,7 @@ def register(mcp: FastMCP):
         This is the primary search tool for the RAG pipeline.
 
         Step 1: Extract equipment tags from query (NER).
-        Step 2: Embed query using 1536-dim nomic-embed-text-v1.5.
+        Step 2: Embed query using Cohere embed-multilingual-v3.0 (1024-dim).
         Step 3: Semantic search in Qdrant Cloud with optional metadata filters.
         Step 4: Traverse Neo4j AuraDB for graph context around detected equipment.
         Step 5: Merge and re-rank results by relevance score.

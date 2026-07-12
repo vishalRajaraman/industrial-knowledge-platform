@@ -10,7 +10,7 @@ Tool Namespaces:
   extract_*  — NLP/NER entity extraction & knowledge engineering
   kg_*       — Knowledge graph (Neo4j AuraDB) operations
   search_*   — Vector + graph + hybrid search
-  rag_*      — RAG pipeline (Groq/Ollama LLM)
+  rag_*      — RAG pipeline (Mistral via NVIDIA NIM)
   maint_*    — Maintenance intelligence & RCA
   comply_*   — Compliance audit tools
   lessons_*  — Lessons learned & safety patterns

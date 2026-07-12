@@ -55,21 +55,22 @@ def register(mcp: FastMCP):
             health["components"]["neo4j_auradb"] = {"status": "unhealthy", "error": str(e)}
             health["overall"] = "degraded"
 
-        # ── LLM providers ────────────────────────────────────────────────────
-        groq_key = bool(os.getenv("GROQ_API_KEY"))
-        google_key = bool(os.getenv("GOOGLE_API_KEY"))
-        ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        health["components"]["llm_providers"] = {
-            "groq": "configured" if groq_key else "not_configured",
-            "google_ai_studio": "configured" if google_key else "not_configured",
-            "ollama": ollama_url,
+        # ── LLM provider (Mistral via NVIDIA NIM) ───────────────────────────────────────────
+        nvidia_key = bool(os.getenv("NVIDIA_API_KEY"))
+        health["components"]["llm_provider"] = {
+            "provider": "NVIDIA NIM",
+            "model": os.getenv("LLM_MODEL", "mistralai/mistral-medium-3.5-128b"),
+            "status": "configured" if nvidia_key else "not_configured",
         }
 
-        # ── Embedding model ───────────────────────────────────────────────────
+        # ── Embedding provider (Cohere Cloud API) ─────────────────────────────────────
         from core import embeddings
-        health["components"]["embedding_model"] = {
+        cohere_key = bool(os.getenv("COHERE_API_KEY"))
+        health["components"]["embedding_provider"] = {
+            "provider": "Cohere Cloud",
             "model": embeddings.EMBED_MODEL_NAME,
             "dim": embeddings.EMBEDDING_DIM,
+            "status": "configured" if cohere_key else "not_configured",
         }
 
         # ── S3 / Object Store ─────────────────────────────────────────────────

@@ -27,9 +27,8 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p /app/ontology /app/data /tmp/uploads
 
-# Pre-download embedding model to avoid cold start delay
-RUN python -c "from sentence_transformers import SentenceTransformer; \
-    SentenceTransformer('nomic-ai/nomic-embed-text-v1.5', trust_remote_code=True)" || true
+# Cohere embedding is cloud API — no model weights to pre-download
+# spaCy model download handles NER offline capability
 
 ENV PORT=8080
 EXPOSE 8080
