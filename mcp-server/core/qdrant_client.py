@@ -25,11 +25,8 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")   # from Qdrant Cloud dashboard
 DEFAULT_COLLECTION = os.getenv("QDRANT_COLLECTION", "ikp_documents")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))    # Cohere embed-multilingual-v3.0 native dim
 
-if not QDRANT_URL or not QDRANT_API_KEY:
-    raise EnvironmentError(
-        "QDRANT_URL and QDRANT_API_KEY must be set for Qdrant Cloud. "
-        "Sign up free at https://cloud.qdrant.io"
-    )
+# NOTE: Credentials are validated lazily in get_client(), not at import time.
+# This allows server.py to finish importing all modules before connectivity is checked.
 
 _client: QdrantClient | None = None
 
@@ -37,7 +34,14 @@ _client: QdrantClient | None = None
 def get_client() -> QdrantClient:
     global _client
     if _client is None:
-        _client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        _url = os.getenv("QDRANT_URL")
+        _key = os.getenv("QDRANT_API_KEY")
+        if not _url or not _key:
+            raise EnvironmentError(
+                "QDRANT_URL and QDRANT_API_KEY must be set for Qdrant Cloud. "
+                "Sign up free at https://cloud.qdrant.io"
+            )
+        _client = QdrantClient(url=_url, api_key=_key)
     return _client
 
 

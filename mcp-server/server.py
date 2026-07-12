@@ -19,6 +19,19 @@ Tool Namespaces:
 
 import logging
 import os
+from pathlib import Path
+
+# ── Load .env FIRST — before any tool/core imports that read env vars ─────────
+# Search for .env in the mcp-server dir, then the project root (one level up)
+_env_candidates = [
+    Path(__file__).parent / ".env",          # mcp-server/.env
+    Path(__file__).parent.parent / ".env",   # project_root/.env  ← standard location
+]
+for _env_path in _env_candidates:
+    if _env_path.exists():
+        from dotenv import load_dotenv
+        load_dotenv(_env_path, override=False)  # override=False: real env vars win
+        break
 
 from mcp.server.fastmcp import FastMCP
 
@@ -30,7 +43,8 @@ logging.basicConfig(
 logger = logging.getLogger("industreak-mcp")
 
 # ── FastMCP application ──────────────────────────────────────────────────────
-mcp = FastMCP("InduStreakAI")
+port = int(os.getenv("PORT", "8080"))
+mcp = FastMCP("InduStreakAI", host="0.0.0.0", port=port)
 
 # ── Register all tool modules ────────────────────────────────────────────────
 from tools.ingestion.pdf_tool import register as reg_pdf
@@ -75,6 +89,5 @@ logger.info("InduStreakAI MCP server initialised — %d tool namespaces loaded",
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8080"))
     logger.info("Starting InduStreakAI MCP server on port %d", port)
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    mcp.run(transport="streamable-http")

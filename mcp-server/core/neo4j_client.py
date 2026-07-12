@@ -17,11 +17,8 @@ NEO4J_URI = os.getenv("NEO4J_URI")          # neo4j+s://xxxx.databases.neo4j.io
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
-if not NEO4J_URI or not NEO4J_PASSWORD:
-    raise EnvironmentError(
-        "NEO4J_URI and NEO4J_PASSWORD must be set for Neo4j AuraDB. "
-        "Sign up free at https://neo4j.com/cloud/aura-free/"
-    )
+# NOTE: Credentials are validated lazily in get_driver(), not at import time.
+# This allows server.py to load all modules before checking connectivity.
 
 _driver: neo4j.AsyncDriver | None = None
 
@@ -29,7 +26,16 @@ _driver: neo4j.AsyncDriver | None = None
 def get_driver() -> neo4j.AsyncDriver:
     global _driver
     if _driver is None:
-        _driver = AsyncGraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        # Lazy validation — only raises when first connection is attempted
+        _uri  = os.getenv("NEO4J_URI")
+        _user = os.getenv("NEO4J_USER", "neo4j")
+        _pwd  = os.getenv("NEO4J_PASSWORD")
+        if not _uri or not _pwd:
+            raise EnvironmentError(
+                "NEO4J_URI and NEO4J_PASSWORD must be set. "
+                "Sign up free at https://neo4j.com/cloud/aura-free/"
+            )
+        _driver = AsyncGraphDatabase.driver(_uri, auth=(_user, _pwd))
     return _driver
 
 
