@@ -30,7 +30,7 @@ RUN mkdir -p /app/ontology /app/data /tmp/uploads
 # Cohere embedding is cloud API — no model weights to pre-download
 # spaCy model download handles NER offline capability
 
-ENV PORT=8080
-EXPOSE 8080
+ENV PORT=9090
+EXPOSE 9090
 
 CMD ["python", "server.py"]
