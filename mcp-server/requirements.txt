@@ -50,3 +50,4 @@ python-dotenv>=1.0.0
 pydantic>=2.7.0
 asyncio-throttle>=1.0.2               # Rate limiting for LLM calls
 python-dateutil>=2.9.0               # Date parsing
+watchdog>=4.0.0                      # OS-native filesystem event monitoring (local watcher)

@@ -12,9 +12,10 @@ version: "3.9"
 # LOCAL SERVICES (this file):
 #   • Single MCP Server (replaces 6 separate servers)
 #   • PostgreSQL (orchestrator metadata)
-#   • MinIO (local S3 fallback — optional if using real AWS S3)
 #   • Frontend Next.js
 #   • Orchestrator (chat/auth API)
+#
+# Local ingestion: drop files into data/watch_inbox/ — watcher auto-ingests them.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 services:
@@ -37,26 +38,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── MinIO (local S3-compatible fallback) ────────────────────────────────────
-  # Use this if you don't have AWS S3 credentials.
-  # Set MINIO_ENDPOINT=http://minio:9000 in .env instead of AWS_* vars.
-  minio:
-    image: minio/minio:RELEASE.2024-05-01T01-11-10Z
-    container_name: ikp-minio
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Console UI
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: mc ready local || exit 1
-      interval: 15s
-      timeout: 5s
-      retries: 5
 
   # ── SINGLE MCP SERVER (replaces 6 separate MCP servers) ────────────────────
   # All intelligence tools in one container:
@@ -78,12 +59,16 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      # Object storage — use real S3 OR MinIO fallback
+      # Object storage — AWS S3
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-south-1}
       - S3_BUCKET=${S3_BUCKET:-industreak-raw-assets}
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-}   # set to http://minio:9000 for local dev
+      - S3_POLL_INTERVAL=${S3_POLL_INTERVAL:-60}
+      - SQS_QUEUE_URL=${SQS_QUEUE_URL:-}
+      # Local file watcher
+      - WATCH_FOLDER=/app/data/watch_inbox
+      - WATCH_RECURSIVE=${WATCH_RECURSIVE:-false}
       # Embedding
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-ai/nomic-embed-text-v1.5}
       - EMBEDDING_DIM=${EMBEDDING_DIM:-1536}
@@ -91,12 +76,10 @@ services:
       - PORT=8080
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
-      - ./data:/app/data                      # Local ingestion watch folder
+      - ./data:/app/data                      # Local watch_inbox folder (mounted into container)
       - ./mcp-server/ontology:/app/ontology   # Industrial ontology files
       - model_cache:/root/.cache              # Embedding model cache
     depends_on:
-      minio:
-        condition: service_healthy
     healthcheck:
       test: curl -f http://localhost:8080/health || exit 1
       interval: 30s
@@ -138,5 +121,4 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
   model_cache:    # Persists downloaded embedding model across restarts

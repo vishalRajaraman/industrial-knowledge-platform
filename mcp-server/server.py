@@ -39,6 +39,10 @@ from mcp.server.fastmcp import FastMCP
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("mcp_server.log", mode="a", encoding="utf-8")
+    ]
 )
 logger = logging.getLogger("industreak-mcp")
 
@@ -90,4 +94,6 @@ logger.info("InduStreakAI MCP server initialised — %d tool namespaces loaded",
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     logger.info("Starting InduStreakAI MCP server on port %d", port)
-    mcp.run(transport="streamable-http")
+    # By not forcing a transport, FastMCP auto-detects stdio vs HTTP(SSE)
+    # This allows the MCP Inspector to connect via STDIO seamlessly.
+    mcp.run()
