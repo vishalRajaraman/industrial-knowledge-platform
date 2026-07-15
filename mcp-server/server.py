@@ -57,6 +57,7 @@ from tools.ingestion.ocr_tool import register as reg_ocr
 from tools.ingestion.pid_tool import register as reg_pid
 from tools.ingestion.watcher import register as reg_watcher
 from tools.ingestion.s3_watcher import register as reg_s3
+from tools.ingestion.erp_connector import register as reg_erp
 
 from tools.knowledge.ner_tool import register as reg_ner
 from tools.knowledge.chunker_tool import register as reg_chunker
@@ -80,7 +81,7 @@ from tools.agents.lessons_learned import register as reg_lessons
 from tools.admin.system_tools import register as reg_admin
 
 for register_fn in [
-    reg_pdf, reg_excel, reg_ocr, reg_pid, reg_watcher, reg_s3,
+    reg_pdf, reg_excel, reg_ocr, reg_pid, reg_watcher, reg_s3, reg_erp,
     reg_ner, reg_chunker, reg_embed, reg_triplet, reg_reg, reg_hier,
     reg_vector, reg_graph, reg_asset,
     reg_hybrid, reg_gsearch,
