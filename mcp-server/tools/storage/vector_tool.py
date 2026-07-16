@@ -3,7 +3,7 @@ Storage tools — Qdrant Cloud vector operations exposed as MCP tools.
 vector_upsert, vector_search, vector_delete, vector_collection_info.
 """
 from mcp.server.fastmcp import FastMCP
-from core import qdrant_client as vc
+from core import pinecone_client as vc
 
 
 def register(mcp: FastMCP):

@@ -62,7 +62,7 @@ except ImportError as e:
 # TEST 2 — Import: core modules
 # ═══════════════════════════════════════════════════════════════════════════════
 print("=" * 60)
-print("TEST 2 — Core module imports (llm_client, embeddings, neo4j_client, qdrant_client)")
+print("TEST 2 — Core module imports (llm_client, embeddings, neo4j_client, pinecone_client)")
 print("=" * 60)
 
 core_modules = [
@@ -80,7 +80,7 @@ for mod_name, desc in core_modules:
         results[f"import_{mod_name}"] = False
 
 # neo4j and qdrant will raise EnvironmentError if creds missing — that's expected
-for mod_name, desc in [("core.neo4j_client", "Neo4j AuraDB client"), ("core.qdrant_client", "Qdrant Cloud client")]:
+for mod_name, desc in [("core.neo4j_client", "Neo4j AuraDB client"), ("core.pinecone_client", "Qdrant Cloud client")]:
     try:
         mod = importlib.import_module(mod_name)
         print(f"✅  {mod_name:30s} — {desc}")

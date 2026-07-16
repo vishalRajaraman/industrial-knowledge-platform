@@ -7,7 +7,7 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 from core import embeddings, neo4j_client
-from core import qdrant_client as vc
+from core import pinecone_client as vc
 from tools.knowledge.ner_tool import _extract_entities_impl
 
 logger = logging.getLogger("ikp.search.hybrid")

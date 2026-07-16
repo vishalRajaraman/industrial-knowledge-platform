@@ -11,7 +11,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from core import embeddings, neo4j_client, object_store
-from core import qdrant_client as vc
+from core import pinecone_client as vc
 from tools.knowledge.ner_tool import _extract_entities_impl
 from tools.knowledge.chunker_tool import _chunk_text
 

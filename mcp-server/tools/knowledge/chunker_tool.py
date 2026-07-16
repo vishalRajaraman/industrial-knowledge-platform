@@ -73,15 +73,23 @@ def _sliding_window(text: str, max_size: int, overlap: int) -> list[str]:
     start = 0
     while start < len(text):
         end = min(start + max_chars, len(text))
-        # Snap to sentence boundary
+        # Snap to sentence boundary, but ONLY if the period is past the overlap threshold!
+        # If we snap to a period too close to `start`, the window won't advance properly
+        # and it creates an infinite-loop-like memory leak.
         if end < len(text):
-            snap = text.rfind(".", start, end)
-            if snap > start:
-                end = snap + 1
+            safe_snap_start = start + overlap_chars
+            if safe_snap_start < end:
+                snap = text.rfind(".", safe_snap_start, end)
+                if snap != -1:
+                    end = snap + 1
+                    
         chunks.append(text[start:end])
-        start = end - overlap_chars
-        if start >= len(text):
-            break
+        
+        # Advance start position. We guarantee end - overlap_chars > start
+        # because of the safe_snap_start condition above.
+        next_start = end - overlap_chars
+        start = max(start + 1, next_start)
+        
     return [c for c in chunks if c.strip()]
 
 

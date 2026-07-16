@@ -58,7 +58,8 @@ def _get_nlp():
                 _nlp = English()
                 logger.warning("spaCy en_core_web_sm not found, using minimal pipeline.")
             # Add industrial EntityRuler
-            ruler = _nlp.add_pipe("entity_ruler", before="ner" if _nlp.has_pipe("ner") else "last")
+            kwargs = {"before": "ner"} if _nlp.has_pipe("ner") else {"last": True}
+            ruler = _nlp.add_pipe("entity_ruler", **kwargs)
             patterns = []
             for pat in EQUIPMENT_TAG_PATTERNS:
                 patterns.append({"label": "EQUIPMENT_TAG", "pattern": [{"TEXT": {"REGEX": pat}}]})

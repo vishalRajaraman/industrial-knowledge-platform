@@ -5,13 +5,14 @@ ingest_pdf: extract text + tables → chunk → embed → store in Qdrant + Neo4
 import logging
 import os
 import uuid
+import requests
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from core import embeddings, neo4j_client, object_store
-from core import qdrant_client as vc
+from core import pinecone_client as vc
 from tools.knowledge.ner_tool import _extract_entities_impl
 from tools.knowledge.chunker_tool import _chunk_text
 
@@ -55,11 +56,58 @@ async def ingest_pdf(
         text = page.get_text("text")
         if text.strip():
             pages_text.append({"page": page_num + 1, "text": text})
-    pdf.close()
+            
     full_text = "\n\n".join(p["text"] for p in pages_text)
+    extraction_method = "PyMuPDF (Digital Text)"
+
+    # Check if scanned (fewer than 50 chars per page on average)
+    num_pages = len(pdf)
+    if len(full_text.strip()) < 50 * num_pages:
+        extraction_method = "OCR.space API (Scanned Image)"
+        logger.info(f"PDF appears to be scanned (< 50 chars/page). Falling back to OCR for {num_pages} pages.")
+        pages_text = []
+        for page_num, page in enumerate(pdf):
+            logger.info(f"OCRing page {page_num + 1}/{num_pages}...")
+            pix = page.get_pixmap()
+            img_bytes = pix.tobytes("jpeg")
+            
+            # Send to OCR.space API
+            api_key = "K88154536588957"
+            url = "https://api.ocr.space/parse/image"
+            payload = {"apikey": api_key, "language": "eng", "OCREngine": "3"}
+            files = {"file": (f"page_{page_num+1}.jpg", img_bytes, "image/jpeg")}
+            
+            try:
+                response = requests.post(url, data=payload, files=files)
+                response.raise_for_status()
+                result = response.json()
+                
+                if result.get("IsErroredOnProcessing"):
+                    error_msg = result.get("ErrorMessage", ["Unknown OCR error"])[0]
+                    logger.error(f"OCR Error on page {page_num+1}: {error_msg}")
+                    continue
+                
+                parsed_results = result.get("ParsedResults", [])
+                if parsed_results:
+                    page_text = parsed_results[0].get("ParsedText", "")
+                    if page_text.strip():
+                        pages_text.append({"page": page_num + 1, "text": page_text})
+            except Exception as e:
+                logger.error(f"Failed to OCR page {page_num+1}: {e}")
+                
+        full_text = "\n\n".join(p["text"] for p in pages_text)
+
+    pdf.close()
 
     if not full_text.strip():
-        return {"error": "No text extracted — file may be a scanned image. Use ingest_image instead."}
+        return {"error": "No text extracted even after OCR fallback."}
+
+    # Print extraction method and text preview to terminal for testing
+    text_preview = full_text[:500].replace('\n', ' ') + ("..." if len(full_text) > 500 else "")
+    logger.info("==================================================")
+    logger.info(f"EXTRACTION METHOD USED: {extraction_method}")
+    logger.info(f"TEXT PREVIEW:\n{text_preview}")
+    logger.info("==================================================")
 
     # ── 2. Upload to S3 ──────────────────────────────────────────────────
     s3_url = None

@@ -10,7 +10,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 from core import neo4j_client
-from core import qdrant_client as vc
+from core import pinecone_client as vc
 
 logger = logging.getLogger("ikp.admin")
 

@@ -14,16 +14,21 @@ automatically via an asyncio background task.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-from watchdog.events import FileCreatedEvent, FileMovedEvent, FileSystemEventHandler
-from watchdog.observers import Observer
 
-logger = logging.getLogger("ikp.ingest.watcher")
+# Ensure we use a logger that definitely writes to the file
+logger = logging.getLogger("industreak-mcp.watcher")
+# Explicitly add the file handler if it's missing (to satisfy user request)
+_file_handler = logging.FileHandler("mcp_server.log", mode="a", encoding="utf-8")
+_file_handler.setFormatter(logging.Formatter("%(asctime)s | %(name)s | %(levelname)s | %(message)s"))
+logger.addHandler(_file_handler)
+logger.setLevel(logging.INFO)
 
 # ── Extension → doc_type mapping ─────────────────────────────────────────────
 EXT_DOC_TYPE: dict[str, str] = {
@@ -46,11 +51,33 @@ _DEFAULT_WATCH_FOLDER = os.getenv(
     str(Path(__file__).resolve().parents[4] / "data" / "watch_inbox"),
 )
 _DEFAULT_RECURSIVE = os.getenv("WATCH_RECURSIVE", "false").lower() == "true"
+_STATE_FILE = Path(__file__).resolve().parents[4] / "data" / "watcher_state.json"
+
+# ── State persistence ─────────────────────────────────────────────────────────
+
+def _load_processed_state() -> set[str]:
+    """Load previously processed file paths from JSON state."""
+    if _STATE_FILE.exists():
+        try:
+            with open(_STATE_FILE, "r", encoding="utf-8") as f:
+                return set(json.load(f))
+        except Exception as exc:
+            logger.error("Failed to load watcher state: %s", exc)
+    return set()
+
+def _save_processed_state(processed: set[str]) -> None:
+    """Save processed file paths to JSON state."""
+    try:
+        _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(processed), f, indent=2)
+    except Exception as exc:
+        logger.error("Failed to save watcher state: %s", exc)
+
 
 # ── Active watcher registry ───────────────────────────────────────────────────
-# key: folder_path → {"observer": Observer, "task": asyncio.Task, "queue": asyncio.Queue}
+# key: folder_path → {"task": asyncio.Task, "recursive": bool}
 _active_watchers: dict[str, dict[str, Any]] = {}
-
 
 # ── Async ingestion router ────────────────────────────────────────────────────
 
@@ -96,73 +123,64 @@ async def _process_file(file_path: str) -> dict:
     logger.info("Ingested %s → %s", file_path, result)
     return result
 
+# Store background tasks globally to prevent GC or cancellation from TaskGroups
+_background_tasks = set()
 
-# ── Watchdog event handler ────────────────────────────────────────────────────
+# ── Async Polling Consumer (Replaces Watchdog) ────────────────────────────────
 
-class _IKPEventHandler(FileSystemEventHandler):
-    """
-    Watchdog event handler that puts newly created/moved-in file paths
-    into an asyncio.Queue that is consumed by the async watcher task.
-
-    Watchdog runs its callbacks in a background thread; the queue is the
-    thread-safe bridge into the event loop.
-    """
-
-    def __init__(self, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
-        super().__init__()
-        self._queue = queue
-        self._loop = loop
-
-    def _enqueue(self, path: str) -> None:
-        """Thread-safe: schedule an item onto the asyncio queue."""
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, path)
-
-    def on_created(self, event: FileCreatedEvent) -> None:  # type: ignore[override]
-        if not event.is_directory:
-            self._enqueue(event.src_path)
-
-    def on_moved(self, event: FileMovedEvent) -> None:  # type: ignore[override]
-        """Catch files moved/renamed *into* the watched folder (e.g. cut-paste)."""
-        if not event.is_directory:
-            self._enqueue(event.dest_path)
-
-
-# ── Async consumer task ───────────────────────────────────────────────────────
-
-async def _consumer_task(
-    queue: asyncio.Queue,
-    processed: set[str],
+async def _polling_task(
     folder_path: str,
+    processed: set[str],
+    recursive: bool,
 ) -> None:
     """
-    Drains the file-event queue and calls _process_file() for each new path.
-    Runs indefinitely until the asyncio task is cancelled.
+    Robust purely-async polling watcher. Avoids all thread/event loop issues
+    caused by watchdog when embedded inside an MCP/FastAPI server.
     """
-    logger.info("Watcher consumer ready for: %s", folder_path)
+    logger.info("Polling watcher ready for: %s", folder_path)
+    target = Path(folder_path)
+    pattern = "**/*" if recursive else "*"
+    
     while True:
         try:
-            file_path = await queue.get()
-            abs_path = str(Path(file_path).resolve())
-
-            if abs_path in processed:
-                queue.task_done()
+            if not target.exists():
+                await asyncio.sleep(2.0)
                 continue
-
-            ext = Path(abs_path).suffix.lower()
-            if ext not in EXT_DOC_TYPE:
-                queue.task_done()
-                continue
-
-            processed.add(abs_path)
-            # Fire and forget — don't block the consumer
-            asyncio.create_task(_process_file(abs_path))
-            queue.task_done()
-
+                
+            new_files_found = False
+            for f in target.glob(pattern):
+                if not f.is_file():
+                    continue
+                    
+                abs_path = str(f.resolve())
+                if abs_path in processed:
+                    continue
+                    
+                ext = f.suffix.lower()
+                if ext not in EXT_DOC_TYPE:
+                    continue
+                    
+                # New file found!
+                logger.info("Detected new file: %s", abs_path)
+                processed.add(abs_path)
+                new_files_found = True
+                
+                # Spawn process task globally
+                process_task = asyncio.create_task(_process_file(abs_path))
+                _background_tasks.add(process_task)
+                process_task.add_done_callback(_background_tasks.discard)
+                
+            if new_files_found:
+                _save_processed_state(processed)
+                
         except asyncio.CancelledError:
-            logger.info("Watcher consumer stopped for: %s", folder_path)
+            logger.info("Polling watcher stopped for: %s", folder_path)
             raise
         except Exception as exc:
-            logger.error("Watcher consumer error: %s", exc, exc_info=True)
+            logger.error("Polling watcher error: %s", exc, exc_info=True)
+            
+        # Poll every 1.5 seconds
+        await asyncio.sleep(1.5)
 
 
 # ── MCP tool registration ─────────────────────────────────────────────────────
@@ -176,28 +194,20 @@ def register(mcp: FastMCP) -> None:
         scan_existing: bool = True,
     ) -> dict:
         """
-        Start monitoring a LOCAL directory for new files using OS-native
-        filesystem events (watchdog). Files are detected instantly — no polling.
-
-        When a new file appears the correct ingestion pipeline is triggered
-        automatically:
-          • .pdf           → ingest_pdf
-          • .xlsx/.xls/.csv → ingest_excel
-          • .png/.jpg/…    → parse_pid (if name contains "pid") or ocr_document
-          • .eml/.msg      → (email — not yet wired)
+        Start monitoring a LOCAL directory for new files using robust async polling.
+        Files are detected automatically.
 
         Args:
             folder_path:    Absolute path to the directory to monitor.
-                            Defaults to WATCH_FOLDER env var, or
-                            data/watch_inbox inside the project root.
-            recursive:      Watch subdirectories too. Defaults to
-                            WATCH_RECURSIVE env var (false).
+                            Defaults to WATCH_FOLDER env var.
+            recursive:      Watch subdirectories too. Defaults to false.
             scan_existing:  If True, immediately ingest any files already
                             present in the folder on startup.
 
         Returns:
             Status dict with watcher details and initial file count.
         """
+        logger.info("watch_local_folder called with path: %s", folder_path)
         target = Path(folder_path or _DEFAULT_WATCH_FOLDER).resolve()
 
         # Auto-create the folder if it doesn't exist
@@ -205,47 +215,44 @@ def register(mcp: FastMCP) -> None:
         folder_str = str(target)
 
         if folder_str in _active_watchers:
+            logger.info("Already watching %s", folder_str)
             return {"status": "already_watching", "folder": folder_str}
 
         use_recursive = recursive if recursive is not None else _DEFAULT_RECURSIVE
-
-        loop = asyncio.get_event_loop()
-        queue: asyncio.Queue = asyncio.Queue()
-        processed: set[str] = set()
+        processed: set[str] = _load_processed_state()
 
         # ── Scan pre-existing files ──────────────────────────────────────────
         initial_files: list[str] = []
         if scan_existing:
             pattern = "**/*" if use_recursive else "*"
+            new_files_found = False
             for f in target.glob(pattern):
                 if f.is_file() and f.suffix.lower() in EXT_DOC_TYPE:
                     abs_f = str(f.resolve())
-                    initial_files.append(abs_f)
-                    processed.add(abs_f)          # mark as seen
-                    asyncio.create_task(_process_file(abs_f))
+                    if abs_f not in processed:
+                        initial_files.append(abs_f)
+                        processed.add(abs_f)          # mark as seen
+                        new_files_found = True
+                        ptask = asyncio.create_task(_process_file(abs_f))
+                        _background_tasks.add(ptask)
+                        ptask.add_done_callback(_background_tasks.discard)
+            
+            if new_files_found:
+                _save_processed_state(processed)
 
-        # ── Start watchdog observer (runs in its own OS thread) ───────────────
-        handler = _IKPEventHandler(queue, loop)
-        observer = Observer()
-        observer.schedule(handler, folder_str, recursive=use_recursive)
-        observer.start()
-        logger.info(
-            "Watchdog observer started: %s (recursive=%s)", folder_str, use_recursive
-        )
-
-        # ── Start async consumer task ─────────────────────────────────────────
+        # ── Start async polling task ─────────────────────────────────────────
         task = asyncio.create_task(
-            _consumer_task(queue, processed, folder_str),
+            _polling_task(folder_str, processed, use_recursive),
             name=f"watcher:{folder_str}",
         )
+        _background_tasks.add(task)
 
         _active_watchers[folder_str] = {
-            "observer": observer,
             "task": task,
-            "queue": queue,
             "recursive": use_recursive,
         }
 
+        logger.info("Successfully activated polling watcher!")
         return {
             "status": "watching",
             "folder": folder_str,
