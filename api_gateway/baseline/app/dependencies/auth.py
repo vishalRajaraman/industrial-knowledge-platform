@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..core.identity import SYSTEM_ROLES, SystemRole
@@ -9,11 +9,18 @@ from ..schemas.auth import AuthenticatedUser
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> AuthenticatedUser:
-    if credentials is None or not credentials.credentials:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)
+) -> AuthenticatedUser:
+    token = request.cookies.get("access_token")
+    if not token and credentials and credentials.credentials:
+        token = credentials.credentials
 
-    decoded = decode_access_token(credentials.credentials)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authentication token")
+
+    decoded = decode_access_token(token)
     username = decoded.get("sub")
     role = decoded.get("role")
 

@@ -16,17 +16,15 @@ Start-Process -NoNewWindow -FilePath "python" -ArgumentList "-m uvicorn orchestr
 
 Start-Sleep -Seconds 3
 
-# 3. Start the Frontend Next.js App
-Write-Host "Starting Next.js Frontend (Port 3000)..." -ForegroundColor Yellow
-Set-Location -Path "frontend"
-Start-Process -NoNewWindow -FilePath "npm.cmd" -ArgumentList "run dev"
-Set-Location -Path ".."
+# 3. Start the API Gateway (which also serves the static frontend)
+Write-Host "Starting API Gateway & Frontend (Port 8100)..." -ForegroundColor Yellow
+Start-Process -NoNewWindow -FilePath "python" -ArgumentList "-m uvicorn api_gateway.baseline.app.main:app --host 0.0.0.0 --port 8100 --reload"
 
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Green
 Write-Host "✅ All services started in the background!" -ForegroundColor Green
 Write-Host "==================================================" -ForegroundColor Green
-Write-Host "Frontend Dashboard: http://localhost:3000"
+Write-Host "Gateway & UI:       http://localhost:8100"
 Write-Host "Orchestrator API:   http://localhost:8000"
 Write-Host "MCP AI Server:      Runs as a FastMCP subprocess"
 Write-Host ""

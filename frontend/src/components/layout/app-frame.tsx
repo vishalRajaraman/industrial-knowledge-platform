@@ -1,0 +1,112 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { getRoleLandingPath } from "@/lib/auth";
+import { useSession } from "@/components/auth/session-provider";
+
+export function AppFrame({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { session, ready, logout } = useSession();
+
+  useEffect(() => {
+    if (!ready) return;
+    if (pathname === "/login") return;
+    if (!session) {
+      router.replace("/login");
+    }
+  }, [pathname, ready, router, session]);
+
+  if (pathname === "/login") {
+    return <>{children}</>;
+  }
+
+  if (!ready || !session) {
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
+        Loading secure workspace...
+      </div>
+    );
+  }
+
+  const canUseSearch = session.role === "manager" || session.role === "engineer";
+
+  const navItems = [
+    { href: "/", label: "Dashboard", icon: "▦" },
+    ...(canUseSearch ? [{ href: "/search", label: "Universal Search", icon: "⌕" }] : []),
+    { href: "/chat", label: "Ask Copilot", icon: "✦" },
+    { href: "/graph", label: "Knowledge Graph", icon: "⟐" },
+    { href: "/maintenance", label: "Predictive RCA", icon: "⚙" },
+    { href: "/compliance", label: "Compliance Audit", icon: "⚠" },
+    { href: "/upload", label: "Ingest Data", icon: "⇪" },
+  ];
+
+  return (
+    <div className="app-container">
+      <aside className="sidebar">
+        <div className="sidebar-logo">
+          <div className="logo-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+          </div>
+          <span>IKP Brain</span>
+        </div>
+
+        <nav className="nav-links">
+          {navItems.map((item) => (
+            <Link key={item.href} href={item.href} className={`nav-link ${pathname === item.href ? "active" : ""}`}>
+              <span style={{ width: 18, textAlign: "center", opacity: 0.9 }}>{item.icon}</span>
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+
+        <div style={{ marginTop: "auto", paddingTop: "2rem", borderTop: "1px solid var(--border-color)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "1rem" }}>
+            <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "linear-gradient(45deg, var(--accent), var(--primary))", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>
+              {session.username.slice(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <div style={{ fontSize: "0.875rem", fontWeight: 600 }}>{session.username}</div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{session.role}</div>
+            </div>
+          </div>
+
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              logout().then(() => {
+                router.replace("/login");
+              });
+            }}
+            style={{ width: "100%", justifyContent: "center" }}
+          >
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <header className="topbar">
+          <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>
+            Bharatpur Refinery <span style={{ color: "var(--text-muted)", fontSize: "1rem", fontWeight: 400, margin: "0 8px" }}>/</span>
+            <button className="btn-secondary" onClick={() => router.push(getRoleLandingPath(session.role))} style={{ marginLeft: "0.75rem", padding: "0.5rem 0.8rem" }}>
+              {session.role === "manager" || session.role === "engineer" ? "Search Portal" : "Dashboard"}
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
+            <div className="btn-secondary" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ color: "var(--accent)" }}>●</span>
+              Authenticated: {session.role}
+            </div>
+          </div>
+        </header>
+
+        <div className="page-content">{children}</div>
+      </main>
+    </div>
+  );
+}
