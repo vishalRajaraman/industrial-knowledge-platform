@@ -35,7 +35,8 @@ def get_driver() -> neo4j.AsyncDriver:
                 "NEO4J_URI and NEO4J_PASSWORD must be set. "
                 "Sign up free at https://neo4j.com/cloud/aura-free/"
             )
-        _driver = AsyncGraphDatabase.driver(_uri, auth=(_user, _pwd))
+        # 30s timeout — enough for AuraDB cold-start/wake-up without hanging forever
+        _driver = AsyncGraphDatabase.driver(_uri, auth=(_user, _pwd), connection_timeout=30.0)
     return _driver
 
 

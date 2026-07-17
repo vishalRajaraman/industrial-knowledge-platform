@@ -37,7 +37,7 @@ Pillow>=10.3.0                        # Image I/O
 # Linux: apt install tesseract-ocr
 
 # ─── P&ID parsing (optional YOLO) ─────────────────────────────────────────────
-# ultralytics>=8.2.0                  # Uncomment after fine-tuning YOLOv8
+# torch>=2.0.0                        # Uncomment after fine-tuning YOLOv5
 # NOTE: Fine-tune required — see post-execution checklist
 
 # ─── NLP / NER ────────────────────────────────────────────────────────────────
