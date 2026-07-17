@@ -12,7 +12,9 @@ Start-Sleep -Seconds 3
 
 # 2. Start the Orchestrator API
 Write-Host "Starting Orchestrator API (Port 8000)..." -ForegroundColor Yellow
-Start-Process -NoNewWindow -FilePath "python" -ArgumentList "-m uvicorn orchestrator.main:app --host 0.0.0.0 --port 8000 --reload"
+Set-Location -Path "orchestrator"
+Start-Process -NoNewWindow -FilePath "python" -ArgumentList "-m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+Set-Location -Path ".."
 
 Start-Sleep -Seconds 3
 
