@@ -93,7 +93,7 @@ def create_app() -> FastAPI:
     )
 
     # Mount the Next.js static export
-    frontend_dir = Path(__file__).resolve().parent.parent.parent.parent.parent / "frontend" / "out"
+    frontend_dir = Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "out"
     if frontend_dir.exists():
         app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
     
