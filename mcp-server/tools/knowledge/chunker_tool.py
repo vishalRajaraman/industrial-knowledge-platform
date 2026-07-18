@@ -16,81 +16,44 @@ def _chunk_text(
 ) -> list[dict]:
     """
     Semantically chunk a document into retrieval-optimal segments.
-    Strategy varies by document type:
-    - Procedures: chunk by numbered step or section
-    - Maintenance logs: chunk by work order entry
-    - Inspection reports: chunk by equipment/finding
-    - Default: recursive character splitter with overlap
+    Uses LangChain's SemanticChunker with Cohere Embeddings to dynamically
+    group sentences by semantic similarity, avoiding arbitrary cutoffs.
     """
+    import os
+    import uuid
+    from langchain_experimental.text_splitter import SemanticChunker
+    from langchain_cohere import CohereEmbeddings
+    
+    if len(text.strip()) < 30:
+        return []
+
+    cohere_api_key = os.getenv("COHERE_API_KEY")
+    if not cohere_api_key:
+        raise ValueError("COHERE_API_KEY environment variable is not set")
+    
+    # Initialize embedding model and SemanticChunker
+    embeddings = CohereEmbeddings(cohere_api_key=cohere_api_key, model="embed-multilingual-v3.0")
+    text_splitter = SemanticChunker(embeddings, breakpoint_threshold_type="percentile")
+    
+    # Split the text semantically
+    docs = text_splitter.create_documents([text])
+    
     chunks = []
-
-    # ── Section-aware splitting ─────────────────────────────────────────────
-    # Detect section headings (numbered, all-caps, or markdown-style)
-    section_pattern = r"(?m)^(?:\d+[\.\)]\s+[A-Z]|#{1,3}\s+|[A-Z]{3,}[:\s]|(?:Step|STEP|Section|SECTION)\s+\d+)"
-    sections = re.split(section_pattern, text)
-
-    raw_chunks = []
-    if len(sections) > 2:
-        # Section-aware: split by detected boundaries
-        for i, section in enumerate(sections):
-            if len(section.strip()) < 50:
-                continue
-            raw_chunks.extend(_sliding_window(section, max_size, overlap))
-    else:
-        # Fallback: paragraph-aware splitting
-        paragraphs = re.split(r"\n\n+", text)
-        current = ""
-        for para in paragraphs:
-            if len(current) + len(para) < max_size * 4:  # chars
-                current += "\n\n" + para
-            else:
-                if current.strip():
-                    raw_chunks.extend(_sliding_window(current, max_size, overlap))
-                current = para
-        if current.strip():
-            raw_chunks.extend(_sliding_window(current, max_size, overlap))
-
-    for i, chunk_text in enumerate(raw_chunks):
-        if len(chunk_text.strip()) < 30:
+    for i, doc in enumerate(docs):
+        chunk_text = doc.page_content.strip()
+        if len(chunk_text) < 10:
             continue
+            
         chunks.append({
             "chunk_id": str(uuid.uuid4()),
             "doc_id": doc_id,
             "doc_type": doc_type,
             "chunk_index": i,
-            "text": chunk_text.strip(),
+            "text": chunk_text,
             "char_length": len(chunk_text),
         })
 
     return chunks
-
-
-def _sliding_window(text: str, max_size: int, overlap: int) -> list[str]:
-    """Split text into overlapping windows (token-approximate using char count × 4)."""
-    max_chars = max_size * 4   # approximate chars per token
-    overlap_chars = overlap * 4
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + max_chars, len(text))
-        # Snap to sentence boundary, but ONLY if the period is past the overlap threshold!
-        # If we snap to a period too close to `start`, the window won't advance properly
-        # and it creates an infinite-loop-like memory leak.
-        if end < len(text):
-            safe_snap_start = start + overlap_chars
-            if safe_snap_start < end:
-                snap = text.rfind(".", safe_snap_start, end)
-                if snap != -1:
-                    end = snap + 1
-                    
-        chunks.append(text[start:end])
-        
-        # Advance start position. We guarantee end - overlap_chars > start
-        # because of the safe_snap_start condition above.
-        next_start = end - overlap_chars
-        start = max(start + 1, next_start)
-        
-    return [c for c in chunks if c.strip()]
 
 
 # ── MCP tool registration ─────────────────────────────────────────────────────
