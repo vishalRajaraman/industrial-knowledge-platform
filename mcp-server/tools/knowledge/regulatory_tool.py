@@ -12,61 +12,82 @@ from core import llm_client
 
 logger = logging.getLogger("ikp.knowledge.regulatory")
 
-# Load regulatory ontology
-_ONTOLOGY_PATH = Path(__file__).parent.parent.parent / "ontology" / "regulatory_frameworks.json"
-_ONTOLOGY: dict = {}
-if _ONTOLOGY_PATH.exists():
-    with open(_ONTOLOGY_PATH) as f:
-        _ONTOLOGY = json.load(f)
+def load_ontologies() -> dict:
+    ontology_dir = Path(__file__).parent.parent.parent / "ontology"
+    ontologies = {}
+    if ontology_dir.exists():
+        for file in ontology_dir.glob("*.json"):
+            # skip asset types
+            if file.name == "asset_types.json": continue
+            try:
+                with open(file) as f:
+                    data = json.load(f)
+                    if "id" in data:
+                        ontologies[data["id"]] = data
+            except Exception as e:
+                logger.warning(f"Failed to load ontology {file.name}: {e}")
+    return ontologies
 
+_ONTOLOGIES = load_ontologies()
 
 def register(mcp: FastMCP):
 
     @mcp.tool()
-    async def align_regulatory(text: str, regulation: str) -> dict:
+    async def align_regulations(text: str, frameworks: list[str]) -> dict:
         """
-        Map document content against a regulatory framework.
+        Map document content against multiple regulatory frameworks simultaneously.
         Identifies which clauses are addressed and which are missing.
 
         Supported frameworks: OISD-154, OISD-STD-144, Factory_Act_1948,
-        PESO, API-RP-686, IS-2825, ISO-55001, ISO-14224.
+        PESO, API-RP-686, API-RP-580, OISD-244.
 
         Args:
             text: Procedure or document text to align.
-            regulation: Target regulation identifier.
+            frameworks: List of target regulation identifiers.
 
         Returns:
-            Matched clauses, coverage percentage, and gap list.
+            JSON containing covered_standards and gaps.
         """
-        framework_data = _ONTOLOGY.get("frameworks", {}).get(regulation, {})
-        clauses = framework_data.get("clauses", [framework_data.get("name", regulation)])
-        clauses_str = "\n".join(f"- {c}" for c in clauses[:20])
+        clauses_str_parts = []
+        total_clauses = 0
+        for fw in frameworks:
+            fw_data = _ONTOLOGIES.get(fw)
+            if not fw_data:
+                continue
+            clauses = fw_data.get("clauses", [])
+            total_clauses += len(clauses)
+            clauses_str_parts.append(f"--- {fw} ---")
+            for c in clauses:
+                clauses_str_parts.append(f"- {fw} Clause {c}")
+                
+        if not clauses_str_parts:
+            return {"error": "No valid frameworks provided or no clauses found."}
 
-        prompt = f"""Analyse how well this document text covers the following {regulation} clauses:
+        clauses_str = "\n".join(clauses_str_parts)
+
+        prompt = f"""Analyse how well this document text covers the following regulatory clauses:
 
 CLAUSES:
 {clauses_str}
 
 DOCUMENT TEXT:
-{text[:6000]}
+{text[:8000]}
 
-For each clause, state: COVERED / PARTIALLY_COVERED / NOT_COVERED with brief evidence.
-Respond with JSON:
-{{"coverage": [{{"clause": "...", "status": "COVERED|PARTIALLY_COVERED|NOT_COVERED", "evidence": "..."}}],
- "overall_coverage_pct": 0-100,
- "gaps": ["list of uncovered clause IDs"]}}"""
+For each clause, determine if it is COVERED or NOT_COVERED by the text.
+Respond with JSON matching this exact structure:
+{{
+  "covered_standards": ["List of completely or partially covered clauses (e.g. 'API RP 686 Section 5.3')"],
+  "gaps": ["List of NOT covered clauses with brief reason (e.g. 'OISD-STD-144 Clause 12 - annual thermal imaging not mentioned')"]
+}}"""
 
         result = await llm_client.json_chat(prompt, temperature=0.1)
 
-        if result and "coverage" in result:
-            return {**result, "regulation": regulation, "clauses_checked": len(clauses)}
+        if result and "covered_standards" in result:
+            return result
 
         # Structured fallback
         return {
-            "regulation": regulation,
-            "clauses_checked": len(clauses),
-            "coverage": [{"clause": c, "status": "UNKNOWN", "evidence": ""} for c in clauses],
-            "overall_coverage_pct": 0,
-            "gaps": clauses,
-            "note": "LLM alignment failed — check LLM provider connectivity.",
+            "covered_standards": [],
+            "gaps": ["LLM evaluation failed or timed out"],
+            "note": "LLM alignment failed — check LLM provider connectivity."
         }

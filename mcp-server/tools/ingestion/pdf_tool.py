@@ -170,13 +170,40 @@ async def ingest_pdf(
         },
     )
 
-    # Create Equipment nodes and link to document
+    # ── 8. Create Entities and Relationships in Neo4j AuraDB ─────────────────
+    # 8a. Equipment
     for eq in entities.get("equipment_tags", []):
         tag = eq["text"].upper()
-        await neo4j_client.upsert_node(
-            node_id=tag, labels=["Equipment"], properties={"tag": tag, "status": "unknown"}
-        )
+        await neo4j_client.upsert_node(tag, ["Equipment"], {"tag": tag, "status": "unknown"})
         await neo4j_client.upsert_edge(tag, doc_id, "MENTIONED_IN")
+        kg_nodes += 2
+
+    # 8b. Regulatory References
+    for reg in entities.get("regulatory_references", []):
+        reg_name = reg["text"]
+        await neo4j_client.upsert_node(reg_name, ["Regulation"], {"name": reg_name})
+        await neo4j_client.upsert_edge(doc_id, reg_name, "REFERENCES")
+        kg_nodes += 2
+
+    # 8c. Failure Modes
+    for fm in entities.get("failure_modes", []):
+        fm_name = fm["text"].lower()
+        await neo4j_client.upsert_node(fm_name, ["FailureMode"], {"name": fm_name})
+        await neo4j_client.upsert_edge(doc_id, fm_name, "MENTIONS_FAILURE")
+        kg_nodes += 2
+
+    # 8d. Process Parameters
+    for pp in entities.get("process_parameters", []):
+        pp_name = pp["text"]
+        await neo4j_client.upsert_node(pp_name, ["ProcessParameter"], {"name": pp_name})
+        await neo4j_client.upsert_edge(doc_id, pp_name, "CONTAINS_PARAMETER")
+        kg_nodes += 2
+        
+    # 8e. Chemicals
+    for chem in entities.get("chemicals", []):
+        chem_name = chem["text"]
+        await neo4j_client.upsert_node(chem_name, ["Chemical"], {"name": chem_name})
+        await neo4j_client.upsert_edge(doc_id, chem_name, "INVOLVES_CHEMICAL")
         kg_nodes += 2
 
     return {

@@ -75,6 +75,8 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
 
     # Chunk into Cohere's 96-text batch limit
     for i in range(0, len(texts), EMBED_BATCH_SIZE):
+        if i > 0:
+            logger.info("Processing next batch of chunks (delay removed)...")
         batch = texts[i: i + EMBED_BATCH_SIZE]
         try:
             response = client.embed(
