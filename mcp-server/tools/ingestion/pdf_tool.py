@@ -137,6 +137,12 @@ async def ingest_pdf(
             "embedding": vec,
             "doc_type": doc_type,
             "equipment_tags": [e["text"] for e in entities.get("equipment_tags", [])],
+            "process_parameters": [e["text"] for e in entities.get("process_parameters", [])],
+            "regulatory_references": [e["text"] for e in entities.get("regulatory_references", [])],
+            "failure_modes": [e["text"] for e in entities.get("failure_modes", [])],
+            "chemicals": [e["text"] for e in entities.get("chemicals", [])],
+            "persons": [e["text"] for e in entities.get("persons", [])],
+            "dates": [e["text"] for e in entities.get("dates", [])],
             "source_path": s3_url or file_path,
             "filename": path.name,
         })
@@ -156,6 +162,11 @@ async def ingest_pdf(
             "source_path": s3_url or file_path,
             "page_count": len(pages_text),
             "chunk_count": len(chunks),
+            "equipment_tags": [e["text"] for e in entities.get("equipment_tags", [])],
+            "process_parameters": [e["text"] for e in entities.get("process_parameters", [])],
+            "regulatory_references": [e["text"] for e in entities.get("regulatory_references", [])],
+            "failure_modes": [e["text"] for e in entities.get("failure_modes", [])],
+            "chemicals": [e["text"] for e in entities.get("chemicals", [])],
         },
     )
 

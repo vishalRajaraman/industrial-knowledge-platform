@@ -59,11 +59,13 @@ Thumbs.db
 # Data
 data/
 erp_dataset/
+NER_dataset/
 ontology/
 tmp/
 temp/
 logs/
 *.log
+0.26.0
 
 # App state
 .s3_watcher_state.json
@@ -73,3 +75,4 @@ logs/
 *.png
 *.jpeg
 *.jpg
+models/

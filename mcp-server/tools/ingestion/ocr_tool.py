@@ -90,6 +90,12 @@ def register(mcp: FastMCP):
         enriched = [
             {**c, "embedding": v, "doc_type": doc_type,
              "equipment_tags": [e["text"] for e in entities.get("equipment_tags", [])],
+             "process_parameters": [e["text"] for e in entities.get("process_parameters", [])],
+             "regulatory_references": [e["text"] for e in entities.get("regulatory_references", [])],
+             "failure_modes": [e["text"] for e in entities.get("failure_modes", [])],
+             "chemicals": [e["text"] for e in entities.get("chemicals", [])],
+             "persons": [e["text"] for e in entities.get("persons", [])],
+             "dates": [e["text"] for e in entities.get("dates", [])],
              "ocr_confidence": round(avg_confidence, 1), "filename": path.name}
             for c, v in zip(chunks, vectors)
         ]
@@ -105,7 +111,12 @@ def register(mcp: FastMCP):
         await neo4j_client.upsert_node(
             doc_id, ["Document"],
             {"title": path.stem, "doc_type": doc_type, "filename": path.name,
-             "ocr_confidence": round(avg_confidence, 1)}
+             "ocr_confidence": round(avg_confidence, 1),
+             "equipment_tags": [e["text"] for e in entities.get("equipment_tags", [])],
+             "process_parameters": [e["text"] for e in entities.get("process_parameters", [])],
+             "regulatory_references": [e["text"] for e in entities.get("regulatory_references", [])],
+             "failure_modes": [e["text"] for e in entities.get("failure_modes", [])],
+             "chemicals": [e["text"] for e in entities.get("chemicals", [])]}
         )
 
         return {

@@ -17,6 +17,34 @@ from tools.knowledge.chunker_tool import _chunk_text
 
 logger = logging.getLogger("ikp.ingest.excel")
 
+def _is_data_sheet(sheet_name: str) -> bool:
+    """Determine if a sheet is a data sheet or a configuration/reference sheet."""
+    skip_keywords = ['config', 'ref', 'dropdown', 'list', 'setting', 'meta', 'lookup', 'validation']
+    sheet_lower = str(sheet_name).lower()
+    return not any(kw in sheet_lower for kw in skip_keywords)
+
+def _extract_table_metadata(df) -> dict:
+    """Extract metadata (column names, types, value ranges) from a dataframe."""
+    import pandas as pd
+    metadata = {}
+    for col in df.columns:
+        col_type = str(df[col].dtype)
+        col_meta = {"type": col_type}
+        try:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                col_meta["min"] = float(df[col].min()) if not pd.isna(df[col].min()) else None
+                col_meta["max"] = float(df[col].max()) if not pd.isna(df[col].max()) else None
+            else:
+                unique_count = df[col].nunique()
+                col_meta["unique_values_count"] = int(unique_count)
+                if unique_count < 10:
+                    # Provide some sample categorical values
+                    col_meta["sample_values"] = df[col].dropna().astype(str).unique()[:5].tolist()
+        except Exception as e:
+            logger.debug(f"Failed to extract metadata for column {col}: {e}")
+            pass
+        metadata[str(col)] = col_meta
+    return metadata
 
 def register(mcp: FastMCP):
 
@@ -34,12 +62,12 @@ def register(mcp: FastMCP):
 
         Args:
             file_path: Absolute path to the Excel or CSV file.
-            sheet_name: Specific sheet to parse (default: all sheets).
+            sheet_name: Specific sheet to parse (default: all data sheets).
             doc_type: Document type tag for metadata.
             upload_to_s3: Upload original file to S3 raw asset store.
 
         Returns:
-            doc_id, rows_processed, chunk_count, vectors_upserted.
+            doc_id, rows_processed, chunk_count, vectors_upserted, sheet_metadata.
         """
         try:
             import pandas as pd
@@ -53,27 +81,75 @@ def register(mcp: FastMCP):
         doc_id = str(uuid.uuid4())
 
         # ── Read file ────────────────────────────────────────────────────────
+        dfs = {}
         try:
             if path.suffix.lower() in (".xlsx", ".xls"):
-                dfs = pd.read_excel(file_path, sheet_name=sheet_name or None)
-                if isinstance(dfs, pd.DataFrame):
-                    dfs = {"Sheet1": dfs}
+                # By default read all sheets
+                excel_dfs = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+                if isinstance(excel_dfs, pd.DataFrame):
+                    # Single sheet returned
+                    dfs = {sheet_name or "Sheet1": excel_dfs}
+                else:
+                    # Filter sheets based on name if all sheets were loaded
+                    dfs = {name: df for name, df in excel_dfs.items() if _is_data_sheet(name)}
             else:  # CSV
-                dfs = {"data": pd.read_csv(file_path)}
+                dfs = {"data": pd.read_csv(file_path, header=None)}
         except Exception as e:
             return {"error": f"Failed to parse file: {e}"}
+
+        # ── Process DataFrames & extract metadata ─────────────────────────────
+        sheet_metadata = {}
+        processed_dfs = {}
+        for sheet, df in dfs.items():
+            if df.empty:
+                continue
+            
+            # Assume first row is header, drop fully empty columns
+            df = df.dropna(how='all', axis=1)
+            
+            if df.empty or len(df) < 2:
+                continue
+                
+            # Set first row as columns
+            raw_columns = df.iloc[0].astype(str).tolist()
+            
+            # Deduplicate column names
+            seen = {}
+            deduped_columns = []
+            for col in raw_columns:
+                col = col.strip()
+                if col in seen:
+                    seen[col] += 1
+                    deduped_columns.append(f"{col}_{seen[col]}")
+                else:
+                    seen[col] = 0
+                    deduped_columns.append(col)
+                    
+            df.columns = deduped_columns
+            df = df[1:].reset_index(drop=True)
+            
+            sheet_metadata[sheet] = _extract_table_metadata(df)
+            processed_dfs[sheet] = df
 
         # ── Convert rows to text ──────────────────────────────────────────────
         all_texts = []
         total_rows = 0
-        for sheet, df in dfs.items():
-            df = df.fillna("").astype(str)
+        for sheet, df in processed_dfs.items():
             for idx, row in df.iterrows():
-                row_text = f"[{sheet} | Row {idx + 1}] " + " | ".join(
-                    f"{col}: {val}" for col, val in row.items() if val.strip()
-                )
-                all_texts.append(row_text)
-                total_rows += 1
+                row_parts = []
+                for col, val in row.items():
+                    val_str = str(val).strip()
+                    if val_str and val_str.lower() not in ('nan', 'none', 'nat'):
+                        row_parts.append(f"{col}={val_str}")
+                
+                if row_parts:
+                    # Row-to-text serialization format
+                    row_text = f"Sheet: {sheet} | Row: {idx + 1} | " + ", ".join(row_parts)
+                    all_texts.append(row_text)
+                    total_rows += 1
+
+        if not all_texts:
+            return {"error": "No data rows found in the file."}
 
         combined_text = "\n".join(all_texts)
 
@@ -89,6 +165,12 @@ def register(mcp: FastMCP):
         enriched_chunks = [
             {**c, "embedding": v, "doc_type": doc_type,
              "equipment_tags": [e["text"] for e in entities.get("equipment_tags", [])],
+             "process_parameters": [e["text"] for e in entities.get("process_parameters", [])],
+             "regulatory_references": [e["text"] for e in entities.get("regulatory_references", [])],
+             "failure_modes": [e["text"] for e in entities.get("failure_modes", [])],
+             "chemicals": [e["text"] for e in entities.get("chemicals", [])],
+             "persons": [e["text"] for e in entities.get("persons", [])],
+             "dates": [e["text"] for e in entities.get("dates", [])],
              "filename": path.name}
             for c, v in zip(chunks, vectors)
         ]
@@ -106,7 +188,12 @@ def register(mcp: FastMCP):
         await neo4j_client.upsert_node(
             doc_id, ["Document"],
             {"title": path.stem, "doc_type": doc_type, "filename": path.name,
-             "row_count": total_rows, "chunk_count": len(chunks)}
+             "row_count": total_rows, "chunk_count": len(chunks), "sheets": list(processed_dfs.keys()),
+             "equipment_tags": [e["text"] for e in entities.get("equipment_tags", [])],
+             "process_parameters": [e["text"] for e in entities.get("process_parameters", [])],
+             "regulatory_references": [e["text"] for e in entities.get("regulatory_references", [])],
+             "failure_modes": [e["text"] for e in entities.get("failure_modes", [])],
+             "chemicals": [e["text"] for e in entities.get("chemicals", [])]}
         )
         for eq in entities.get("equipment_tags", []):
             tag = eq["text"].upper()
@@ -117,9 +204,10 @@ def register(mcp: FastMCP):
             "doc_id": doc_id,
             "filename": path.name,
             "doc_type": doc_type,
-            "sheets_parsed": list(dfs.keys()),
+            "sheets_parsed": list(processed_dfs.keys()),
             "rows_processed": total_rows,
             "chunk_count": len(chunks),
             "vectors_upserted": upsert_result.get("upserted", 0),
             "s3_url": s3_url,
+            "metadata": sheet_metadata
         }

@@ -6,6 +6,7 @@ Knowledge engineering tools:
 """
 import asyncio
 import logging
+import os
 import re
 from typing import Any
 
@@ -13,8 +14,8 @@ from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger("ikp.knowledge.ner")
 
-# ── spaCy setup ──────────────────────────────────────────────────────────────
-_nlp = None
+# ── GLiNER setup ──────────────────────────────────────────────────────────────
+_gliner_model = None
 
 EQUIPMENT_TAG_PATTERNS = [
     r"\b[A-Z]{1,3}-\d{3,4}[A-Z]?\b",          # P-101A, HE-201
@@ -46,30 +47,25 @@ FAILURE_MODES = [
 ]
 
 
-def _get_nlp():
-    global _nlp
-    if _nlp is None:
+def _get_gliner():
+    global _gliner_model
+    if _gliner_model is None:
         try:
-            import spacy
-            try:
-                _nlp = spacy.load("en_core_web_sm")
-            except OSError:
-                from spacy.lang.en import English
-                _nlp = English()
-                logger.warning("spaCy en_core_web_sm not found, using minimal pipeline.")
-            # Add industrial EntityRuler
-            kwargs = {"before": "ner"} if _nlp.has_pipe("ner") else {"last": True}
-            ruler = _nlp.add_pipe("entity_ruler", **kwargs)
-            patterns = []
-            for pat in EQUIPMENT_TAG_PATTERNS:
-                patterns.append({"label": "EQUIPMENT_TAG", "pattern": [{"TEXT": {"REGEX": pat}}]})
-            for mode in FAILURE_MODES:
-                words = mode.split()
-                patterns.append({"label": "FAILURE_MODE", "pattern": [{"LOWER": w} for w in words]})
-            ruler.add_patterns(patterns)
+            from gliner import GLiNER
+            # Assume models/gliner-ikp-v1 is at project root
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+            model_path = os.path.join(project_root, 'models', 'gliner-ikp-v1')
+            
+            if os.path.exists(model_path):
+                logger.info(f"Loading fine-tuned GLiNER from {model_path}")
+                _gliner_model = GLiNER.from_pretrained(model_path)
+            else:
+                logger.warning(f"Fine-tuned GLiNER not found at {model_path}. Loading base model.")
+                _gliner_model = GLiNER.from_pretrained("urchade/gliner_medium-v2.1")
         except ImportError:
-            _nlp = None
-    return _nlp
+            logger.error("GLiNER not installed. pip install gliner")
+            _gliner_model = None
+    return _gliner_model
 
 
 async def _extract_entities_impl(text: str, doc_id: str = "") -> dict:
@@ -87,7 +83,7 @@ async def _extract_entities_impl(text: str, doc_id: str = "") -> dict:
             "chemicals": [],
         }
 
-        # ── Regex-based extraction (always runs) ─────────────────────────────
+        # ── Regex-based extraction (fallback / complement) ─────────────────────────────
         for pat in EQUIPMENT_TAG_PATTERNS:
             for m in re.finditer(pat, text):
                 tag = m.group().upper()
@@ -108,17 +104,62 @@ async def _extract_entities_impl(text: str, doc_id: str = "") -> dict:
                 idx = text_lower.find(mode)
                 result["failure_modes"].append({"text": mode, "start": idx})
 
-        # ── spaCy NER (persons, dates, chemicals) ────────────────────────────
-        nlp = _get_nlp()
-        if nlp:
-            doc = nlp(text[:100000])  # limit for performance
-            for ent in doc.ents:
-                if ent.label_ == "PERSON":
-                    result["persons"].append({"text": ent.text, "start": ent.start_char})
-                elif ent.label_ in ("DATE", "TIME"):
-                    result["dates"].append({"text": ent.text, "label": ent.label_})
-                elif ent.label_ in ("CHEMICAL", "PRODUCT"):
-                    result["chemicals"].append({"text": ent.text})
+        # ── GLiNER NER (All domain entities) ────────────────────────────
+        model = _get_gliner()
+        if model:
+            labels = ["Equipment Tag", "Process Parameter", "Regulatory Reference", "Failure Mode", "Person", "Date", "Chemical"]
+            
+            # GLiNER works best on shorter chunks, so we chunk the text into 2000-char windows with slight overlap.
+            window_size = 2000
+            overlap = 100
+            windows = []
+            
+            # Create overlapping windows
+            start_idx = 0
+            while start_idx < len(text):
+                end_idx = min(start_idx + window_size, len(text))
+                windows.append((start_idx, text[start_idx:end_idx]))
+                start_idx += window_size - overlap
+                if end_idx == len(text):
+                    break
+
+            try:
+                for w_start, window_text in windows:
+                    entities = model.predict_entities(window_text, labels, threshold=0.3)
+                    for ent in entities:
+                        label = ent["label"]
+                        text_val = ent["text"]
+                        start = w_start + ent["start"]
+                        
+                        if label == "Equipment Tag":
+                            # Avoid duplicates from regex
+                            if text_val.upper() not in [e["text"].upper() for e in result["equipment_tags"]]:
+                                result["equipment_tags"].append({"text": text_val, "start": start, "source": "gliner"})
+                        elif label == "Process Parameter":
+                            if text_val not in [e["text"] for e in result["process_parameters"]]:
+                                result["process_parameters"].append({"text": text_val, "start": start, "source": "gliner"})
+                        elif label == "Regulatory Reference":
+                            if text_val not in [e["text"] for e in result["regulatory_references"]]:
+                                result["regulatory_references"].append({"text": text_val, "start": start, "source": "gliner"})
+                        elif label == "Failure Mode":
+                            if text_val.lower() not in [e.get("text", "").lower() for e in result["failure_modes"]]:
+                                result["failure_modes"].append({"text": text_val, "start": start, "source": "gliner"})
+                        elif label == "Person":
+                            if text_val not in [e["text"] for e in result["persons"]]:
+                                result["persons"].append({"text": text_val, "start": start, "source": "gliner"})
+                        elif label == "Date":
+                            if text_val not in [e["text"] for e in result["dates"]]:
+                                result["dates"].append({"text": text_val, "start": start, "source": "gliner"})
+                        elif label == "Chemical":
+                            if text_val not in [e["text"] for e in result["chemicals"]]:
+                                result["chemicals"].append({"text": text_val, "start": start, "source": "gliner"})
+            except Exception as e:
+                logger.error(f"GLiNER prediction failed: {e}")
+
+        logger.info(f"GLiNER Extracted for doc '{doc_id}': Equipment={len(result['equipment_tags'])}, Parameters={len(result['process_parameters'])}, Regulations={len(result['regulatory_references'])}, Failures={len(result['failure_modes'])}, Chemicals={len(result['chemicals'])}")
+        if result['equipment_tags']: logger.info(f"Sample Equipment: {[e['text'] for e in result['equipment_tags'][:5]]}")
+        if result['process_parameters']: logger.info(f"Sample Parameters: {[e['text'] for e in result['process_parameters'][:3]]}")
+        if result['failure_modes']: logger.info(f"Sample Failures: {[e['text'] for e in result['failure_modes'][:3]]}")
 
         return result
 
