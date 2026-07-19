@@ -19,7 +19,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
     }
   }, [pathname, ready, router, session]);
 
-  if (pathname === "/login") {
+  if (pathname === "/login" || pathname.startsWith("/mobile")) {
     return <>{children}</>;
   }
 
