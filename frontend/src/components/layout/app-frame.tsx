@@ -46,11 +46,8 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const canUseSearch = session.role === "manager" || session.role === "engineer";
-
   const navItems = [
     { href: "/", label: "Dashboard", icon: "▦" },
-    ...(canUseSearch ? [{ href: "/search", label: "Universal Search", icon: "⌕" }] : []),
     { href: "/chat", label: "Ask Copilot", icon: "✦" },
     { href: "/graph", label: "Knowledge Graph", icon: "⟐" },
     { href: "/compliance", label: "Compliance Audit", icon: "⚠" },
@@ -107,8 +104,8 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
         <header className="topbar">
           <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>
             Bharatpur Refinery <span style={{ color: "var(--text-muted)", fontSize: "1rem", fontWeight: 400, margin: "0 8px" }}>/</span>
-            <button className="btn-secondary" onClick={() => router.push(getRoleLandingPath(session.role))} style={{ marginLeft: "0.75rem", padding: "0.5rem 0.8rem" }}>
-              {session.role === "manager" || session.role === "engineer" ? "Search Portal" : "Dashboard"}
+            <button className="btn-secondary" onClick={() => router.push("/")} style={{ marginLeft: "0.75rem", padding: "0.5rem 0.8rem" }}>
+              Dashboard
             </button>
           </div>
           <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
