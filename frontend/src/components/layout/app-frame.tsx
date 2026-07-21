@@ -53,7 +53,6 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
     ...(canUseSearch ? [{ href: "/search", label: "Universal Search", icon: "⌕" }] : []),
     { href: "/chat", label: "Ask Copilot", icon: "✦" },
     { href: "/graph", label: "Knowledge Graph", icon: "⟐" },
-    { href: "/maintenance", label: "Predictive RCA", icon: "⚙" },
     { href: "/compliance", label: "Compliance Audit", icon: "⚠" },
     { href: "/upload", label: "Ingest Data", icon: "⇪" },
   ];

@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
 
   // Allow HMR websocket connections from 127.0.0.1 and localhost in development.
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  turbopack: {},
 };
 
 export default withSerwist(nextConfig);
