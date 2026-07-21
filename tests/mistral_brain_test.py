@@ -34,7 +34,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", "z-ai/glm-5.2")
 
 if not NVIDIA_API_KEY:
     print("❌  NVIDIA_API_KEY is not set. Add it to your .env file.")
-    sys.exit(1)
+    if __name__ == "__main__":
+        sys.exit(1)
 
 print(f"\n🔑  API Key   : {NVIDIA_API_KEY[:12]}...{NVIDIA_API_KEY[-4:]}")
 print(f"🤖  Model     : {LLM_MODEL}")
@@ -47,12 +48,13 @@ try:
     print("✅  openai package found")
 except ImportError:
     print("❌  openai not installed. Run: pip install openai")
-    sys.exit(1)
+    if __name__ == "__main__":
+        sys.exit(1)
 
 client = AsyncOpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
-    api_key=NVIDIA_API_KEY,
-)
+    api_key=NVIDIA_API_KEY or "dummy_key_to_prevent_crash_during_pytest_collection",
+) if "AsyncOpenAI" in locals() else None
 
 COMMON_PARAMS = dict(
     model=LLM_MODEL,

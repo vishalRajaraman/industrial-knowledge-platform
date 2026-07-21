@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useTransition } from 'react';
 
 interface Source {
   doc_id: string;
@@ -26,6 +26,15 @@ export default function ChatCopilot() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    const initQ = sessionStorage.getItem('initialQuery');
+    if (initQ) {
+      sessionStorage.removeItem('initialQuery');
+      startTransition(() => setInput(initQ));
+    }
+  }, [startTransition]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -45,10 +54,11 @@ export default function ChatCopilot() {
 
     try {
       // Direct orchestrator call to API
-      const res = await fetch('/api/copilot', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${apiUrl}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: userMsg })
+        body: JSON.stringify({ query: userMsg, user_role: 'operator' })
       });
       
       if (!res.ok) throw new Error('API error');
@@ -57,25 +67,17 @@ export default function ChatCopilot() {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: data.answer || "Sorry, I couldn't process that request.",
-        confidence: data.confidence || 0.85,
+        confidence: data.confidence || null,
         sources: data.sources || []
       }]);
     } catch (e) {
       console.error(e);
-      // Fallback for UI demo
-      setTimeout(() => {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: "Based on the maintenance manuals [DOC-401] and the recent vibration logs, the root cause is likely mechanical seal wear due to catalyst fines in the slurry. \n\n⚠️ **Safety Note**: Ensure the unit is depressurized before inspection.",
-          confidence: 0.92,
-          sources: [
-            { doc_id: "DOC-401", section_title: "Pump Maintenance Guide", score: 0.89 },
-            { doc_id: "LOG-2024-11", section_title: "Vibration Readings P-2003A", score: 0.85 }
-          ]
-        }]);
-        setIsLoading(false);
-      }, 1500);
-      return;
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: "Error: Could not connect to the InduStreakAI Orchestrator. Please ensure the backend server is running.",
+        confidence: null,
+        sources: []
+      }]);
     }
     
     setIsLoading(false);

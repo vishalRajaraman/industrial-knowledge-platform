@@ -10,6 +10,7 @@ from .api.v1.documents import get_upload_task, upload_document
 from .api.v1.auth import login, get_me, logout
 from .api.v1.health import get_health
 from .api.v1.search import post_graph_search, post_vector_search
+from .api.v1.system import get_system_stats
 from .core.config import settings
 from .core.middleware import configure_middleware
 from .schemas.auth import AuthenticatedUser, LoginRequest, TokenResponse
@@ -74,6 +75,12 @@ def create_app() -> FastAPI:
         get_health,
         methods=["GET"],
         response_model=HealthResponse,
+        tags=["system"],
+    )
+    app.add_api_route(
+        f"{settings.api_prefix}/system/stats",
+        get_system_stats,
+        methods=["GET"],
         tags=["system"],
     )
     app.add_api_route(

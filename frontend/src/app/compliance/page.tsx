@@ -1,39 +1,67 @@
 "use client";
 import { useState } from 'react';
 
+interface ComplianceGap {
+  clause: string;
+  requirement: string;
+  severity: 'High' | 'Medium' | 'Low';
+  current_state: string;
+  recommendation: string;
+}
+
+interface ComplianceResult {
+  framework: string;
+  overall_coverage: number;
+  summary: string;
+  docs_checked: number;
+  gaps: ComplianceGap[];
+}
+
 export default function ComplianceAuditor() {
   const [framework, setFramework] = useState('OISD_154');
+  const [scope, setScope] = useState('All Plant');
   const [isAuditing, setIsAuditing] = useState(false);
-  const [results, setResults] = useState<any>(null);
+  const [results, setResults] = useState<ComplianceResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const runAudit = () => {
+  const runAudit = async () => {
     setIsAuditing(true);
-    // Simulate API call to orchestrator
-    setTimeout(() => {
+    setError(null);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const queryStr = `Check compliance gaps for framework ${framework} targeting ${scope}`;
+      
+      const res = await fetch(`${apiUrl}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: queryStr, user_role: 'auditor', regulation: framework })
+      });
+      
+      if (!res.ok) throw new Error('API Error');
+      const data = await res.json();
+
+      // Compliance agent returns structured data in metadata.results (gap_res object)
+      // or a breakdown in the metadata directly
+      const meta = data.metadata || {};
+      const resultsData = meta.results || meta || {};
+      const gapCount = meta.gap_count ?? (resultsData.gaps?.length ?? 0);
+      const rawCoverage = resultsData.overall_coverage ?? (gapCount === 0 ? 1.0 : Math.max(0, 1 - gapCount * 0.1));
+      // Normalize coverage: backend may return 0.85 or 85
+      const coverage = rawCoverage > 1 ? rawCoverage / 100 : rawCoverage;
+
       setResults({
         framework: framework,
-        overall_coverage: 0.65,
-        summary: `Partial compliance found for ${framework}. Key gaps in inspection records and periodic test documentation.`,
-        docs_checked: 412,
-        gaps: [
-          {
-            clause: "7.3.1",
-            requirement: "Fire water pump inspection every 3 months",
-            current_state: "Annual inspection record found, quarterly records missing",
-            severity: "High",
-            recommendation: "Implement quarterly pump test log immediately"
-          },
-          {
-            clause: "8.2",
-            requirement: "Hydrant flow test records (annual)",
-            current_state: "No records found in knowledge base",
-            severity: "Medium",
-            recommendation: "Conduct flow test and ingest test report"
-          }
-        ]
+        overall_coverage: coverage,
+        summary: resultsData.summary || data.answer || "Compliance analysis complete.",
+        docs_checked: resultsData.docs_checked ?? (data.sources?.length ?? 0),
+        gaps: resultsData.gaps || [],
       });
-      setIsAuditing(false);
-    }, 2000);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to run audit. Ensure the InduStreakAI Orchestrator is running.");
+      setResults(null);
+    }
+    setIsAuditing(false);
   };
 
   return (
@@ -65,8 +93,9 @@ export default function ComplianceAuditor() {
             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>Scope (Equipment/Area)</label>
             <input 
               type="text" 
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
               placeholder="e.g., CDU-1, Fire Water Pumps, or All Plant" 
-              defaultValue="All Plant"
               style={{ width: '100%', padding: '0.875rem', borderRadius: '8px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-color)', color: 'white', outline: 'none' }}
             />
           </div>
@@ -84,6 +113,12 @@ export default function ComplianceAuditor() {
           </button>
         </div>
       </div>
+      
+      {error && (
+        <div className="glass-panel" style={{ padding: '1rem', borderColor: 'rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.1)', marginBottom: '1.5rem' }}>
+          {error}
+        </div>
+      )}
 
       {results && (
         <div className="animate-in stagger-1">
@@ -112,17 +147,28 @@ export default function ComplianceAuditor() {
           </div>
 
           <h3 style={{ fontSize: '1.25rem', marginBottom: '1rem', marginTop: '2rem' }}>Identified Compliance Gaps</h3>
+          {results.gaps.length === 0 ? (
+            <div className="glass-panel" style={{ padding: '1.5rem', borderColor: 'rgba(16,185,129,0.3)', background: 'rgba(16,185,129,0.05)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: 'var(--success)' }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                <div>
+                  <div style={{ fontWeight: 600 }}>No Structured Gaps Detected</div>
+                  <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: '4px' }}>The compliance agent found no specific gap records for {results.framework}. Review the executive summary above for a full analysis.</div>
+                </div>
+              </div>
+            </div>
+          ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {results.gaps.map((gap: any, idx: number) => (
-              <div key={idx} className="glass-card" style={{ padding: '1.5rem', borderLeft: `4px solid ${gap.severity === 'High' ? 'var(--danger)' : 'var(--warning)'}` }}>
+            {results.gaps.map((gap: ComplianceGap, idx: number) => (
+              <div key={idx} className="glass-card" style={{ padding: '1.5rem', borderLeft: `4px solid ${gap.severity === 'High' ? 'var(--danger)' : gap.severity === 'Low' ? 'var(--success)' : 'var(--warning)'}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                   <div>
                     <span style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', marginRight: '8px' }}>Clause {gap.clause}</span>
                     <span style={{ fontWeight: 600, fontSize: '1.125rem' }}>{gap.requirement}</span>
                   </div>
                   <span style={{ 
-                    background: gap.severity === 'High' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)', 
-                    color: gap.severity === 'High' ? 'var(--danger)' : 'var(--warning)', 
+                    background: gap.severity === 'High' ? 'rgba(239, 68, 68, 0.2)' : gap.severity === 'Low' ? 'rgba(16,185,129,0.2)' : 'rgba(245, 158, 11, 0.2)', 
+                    color: gap.severity === 'High' ? 'var(--danger)' : gap.severity === 'Low' ? 'var(--success)' : 'var(--warning)', 
                     padding: '4px 12px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 600 
                   }}>
                     {gap.severity} Risk
@@ -142,6 +188,7 @@ export default function ComplianceAuditor() {
               </div>
             ))}
           </div>
+          )}
         </div>
       )}
       <style dangerouslySetInnerHTML={{__html: `

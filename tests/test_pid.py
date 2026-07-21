@@ -46,4 +46,5 @@ async def run():
     elapsed2 = time.time() - t
     print(f"Elapsed: {elapsed2:.1f}s")
 
-asyncio.run(run())
+if __name__ == "__main__":
+    asyncio.run(run())

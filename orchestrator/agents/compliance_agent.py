@@ -37,7 +37,7 @@ class ComplianceAgent:
             }
 
         # Specific gap detection requested
-        gap_res = await self.mcp.call_tool("compliance", "detect_compliance_gaps", {
+        gap_res = await self.mcp.call_tool("compliance", "comply_detect_gaps", {
             "regulation": regulation,
             "scope_query": query
         })
@@ -67,7 +67,7 @@ class ComplianceAgent:
             answer += f"   - **Recommendation:** {gap.get('recommendation', 'Address immediately')}\n\n"
             
         # Audit compilation
-        audit_res = await self.mcp.call_tool("compliance", "compile_audit_package", {
+        audit_res = await self.mcp.call_tool("compliance", "comply_compile_audit", {
             "regulation": regulation
         })
         
@@ -78,5 +78,5 @@ class ComplianceAgent:
             "answer": answer,
             "sources": gap_res.get("sources", []),
             "confidence": 0.85,
-            "metadata": {"type": "gap_analysis", "gap_count": len(gaps)}
+            "metadata": {"type": "gap_analysis", "gap_count": len(gaps), "results": gap_res}
         }

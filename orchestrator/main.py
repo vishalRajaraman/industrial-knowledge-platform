@@ -20,11 +20,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agents.router import RouterAgent
-from agents.ingestion_agent import IngestionAgent
 from agents.copilot_agent import CopilotAgent
-from agents.maintenance_agent import MaintenanceAgent
 from agents.compliance_agent import ComplianceAgent
-from agents.lessons_agent import LessonsAgent
 from mcp_client import MCPClientManager
 
 
@@ -110,13 +107,23 @@ async def upload_document(
         tmp_path = tmp.name
 
     try:
-        agent = IngestionAgent(mcp_manager)
-        result = await agent.run(
-            file_path=tmp_path,
-            filename=file.filename or "document",
-            doc_id=doc_id,
-            doc_type=doc_type,
-            plant_id=plant_id,
+        # Determine the correct ingestion tool based on doc_type or extension
+        tool_name = "ingest_pdf" # Default
+        if suffix.lower() in ['.xlsx', '.xls', '.csv']:
+            tool_name = "ingest_excel"
+        elif doc_type == "pid":
+            tool_name = "ingest_pid"
+        elif doc_type == "drawing":
+            tool_name = "ingest_drawing"
+            
+        result = await mcp_manager.call_tool(
+            server="ingestion",
+            tool_name=tool_name,
+            arguments={
+                "file_path": tmp_path,
+                "doc_type": doc_type,
+                "metadata": {"plant_id": plant_id, "filename": file.filename, "doc_id": doc_id}
+            }
         )
         return {
             "doc_id": doc_id,
@@ -144,19 +151,26 @@ async def query(request: QueryRequest):
     category = route["category"]
     entities = route.get("entities_detected", [])
 
-    # Dispatch to agent
+    # Dispatch to agent or tool based on intent
     if category == "KNOWLEDGE_QUERY":
         agent = CopilotAgent(mcp_manager)
         result = await agent.run(request.query, entities, request.user_role)
-    elif category == "MAINTENANCE_QUERY":
-        agent = MaintenanceAgent(mcp_manager)
-        result = await agent.run(request.query, request.equipment_id or entities)
     elif category == "COMPLIANCE_QUERY":
         agent = ComplianceAgent(mcp_manager)
         result = await agent.run(request.query, request.regulation)
-    elif category == "LESSONS_QUERY":
-        agent = LessonsAgent(mcp_manager)
-        result = await agent.run(request.query)
+    elif category == "DIRECT_SEARCH":
+        # Bypass agents and call the hybrid_search tool directly
+        search_result = await mcp_manager.call_tool("knowledge", "hybrid_search", {
+            "query": request.query,
+            "top_k": 10,
+            "equipment_tags": entities
+        })
+        result = {
+            "answer": "Here are the files and documents matching your search.",
+            "sources": search_result.get("combined_sources", []),
+            "confidence": 1.0,
+            "metadata": {"graph_context": search_result.get("graph_context", {})}
+        }
     else:
         # Default to copilot
         agent = CopilotAgent(mcp_manager)

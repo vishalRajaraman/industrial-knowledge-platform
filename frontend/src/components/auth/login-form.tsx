@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getRoleLandingPath, type UserRole } from "@/lib/auth";
-import { GATEWAY_API_BASE, type LoginResponse } from "@/lib/gateway";
+import { GATEWAY_API_BASE } from "@/lib/gateway";
 import { useSession } from "./session-provider";
 
 type LoginFormState = {
@@ -52,7 +52,10 @@ export function LoginForm() {
         throw new Error(response.status === 401 ? "Invalid credentials" : `Login failed (${response.status})`);
       }
 
-      await refreshFromServer();
+      const success = await refreshFromServer();
+      if (!success) {
+        throw new Error("Unable to establish session. Please check your connection.");
+      }
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "Unable to sign in");
     } finally {

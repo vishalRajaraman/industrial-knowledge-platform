@@ -20,14 +20,16 @@ interface NodeData {
   type?: string;
   group?: string;
   val?: number;
-  [key: string]: any;
+  x?: number;
+  y?: number;
+  [key: string]: unknown;
 }
 
 interface EdgeData {
-  source: string;
-  target: string;
+  source: string | NodeData;
+  target: string | NodeData;
   label?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface GraphData {
@@ -44,6 +46,8 @@ export function GraphVisualizer({
   onNodeClick: (node: NodeData | null) => void;
   selectedNodeId: string | null;
 }) {
+  // ForceGraph2D ref — use a generic mutable ref to avoid type conflicts with the library
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,7 +63,7 @@ export function GraphVisualizer({
     return () => observer.disconnect();
   }, []);
 
-  const handleNodeClick = useCallback((node: any) => {
+  const handleNodeClick = useCallback((node: NodeData) => {
     onNodeClick(node);
   }, [onNodeClick]);
 
@@ -75,36 +79,36 @@ export function GraphVisualizer({
             links: data.edges.map(e => ({ ...e, source: e.source, target: e.target })),
           }}
           nodeRelSize={6}
-          nodeColor={(node: any) => TYPE_COLORS[node.type || "Entity"] || "#6b7280"}
-          nodeVal={(node: any) => (node.id === selectedNodeId ? 12 : node.val || 6)}
+          nodeColor={(node: NodeData) => TYPE_COLORS[node.type || "Entity"] || "#6b7280"}
+          nodeVal={(node: NodeData) => (node.id === selectedNodeId ? 12 : (node.val ?? 6))}
           linkColor={() => "rgba(148, 163, 184, 0.25)"}
           linkDirectionalArrowLength={3.5}
           linkDirectionalArrowRelPos={1}
           linkCurvature={0.25}
           onNodeClick={handleNodeClick}
-          nodeCanvasObject={(node: any, ctx, globalScale) => {
-            const label = node.label || node.id;
+          nodeCanvasObject={(node: NodeData, ctx: CanvasRenderingContext2D, globalScale: number) => {
+            const label = (node.label as string) || node.id;
             const fontSize = 12 / globalScale;
             ctx.font = `${fontSize}px Inter, sans-serif`;
-            
+
             const color = TYPE_COLORS[node.type || "Entity"] || "#6b7280";
             const isSelected = node.id === selectedNodeId;
 
             ctx.beginPath();
-            ctx.arc(node.x, node.y, isSelected ? 8 : 5, 0, 2 * Math.PI, false);
+            ctx.arc(node.x ?? 0, node.y ?? 0, isSelected ? 8 : 5, 0, 2 * Math.PI, false);
             ctx.fillStyle = color;
             ctx.fill();
-            
+
             if (isSelected) {
               ctx.lineWidth = 1.5;
-              ctx.strokeStyle = 'white';
+              ctx.strokeStyle = "white";
               ctx.stroke();
             }
 
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillStyle = isSelected ? 'white' : 'rgba(255, 255, 255, 0.8)';
-            ctx.fillText(label, node.x, node.y + (isSelected ? 14 : 10));
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = isSelected ? "white" : "rgba(255, 255, 255, 0.8)";
+            ctx.fillText(label, node.x ?? 0, (node.y ?? 0) + (isSelected ? 14 : 10));
           }}
         />
       )}

@@ -1,75 +1,78 @@
-"""Router Agent — classifies queries and dispatches to sub-agents using Ollama."""
+import json
 import logging
 import os
-import sys
+import httpx
 from typing import Any
 
-# Add shared module to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../shared"))
-import ollama_client as ollama
+from mcp_client import MCPClientManager
 
-logger = logging.getLogger("router-agent")
+logger = logging.getLogger("orchestrator.router")
 
-SYSTEM_PROMPT = """You are the Industrial Knowledge Intelligence Router Agent.
-
-Analyze the user query and classify it into exactly ONE category:
-
-KNOWLEDGE_QUERY    — General questions about equipment, procedures, documents, specifications, SOPs
-MAINTENANCE_QUERY  — Equipment failures, maintenance, RCA, vibration, bearing, seal issues
-COMPLIANCE_QUERY   — Regulatory requirements, audit prep, compliance gaps, standards (OISD, ISO, etc.)
-LESSONS_QUERY      — Safety incidents, near-misses, historical patterns, warnings
-INGESTION          — New document to process (triggered programmatically)
-
-You MUST respond with ONLY valid JSON. No explanation. No markdown.
-Required keys: category, reasoning, entities_detected (list), intent"""
-
-CLASSIFY_PROMPT = """Classify this query and extract any equipment tags or regulation names mentioned:
-
-Query: {query}
-
-Respond ONLY with JSON like:
-{{"category": "MAINTENANCE_QUERY", "reasoning": "User asks about pump failure", "entities_detected": ["P-2003A"], "intent": "understand seal failure root cause"}}"""
-
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+LLM_MODEL = os.getenv("LLM_MODEL", "mistralai/mistral-medium-3.5-128b")
 
 class RouterAgent:
-    def __init__(self, mcp_manager):
+    """
+    Supervisor Agent that analyzes the user's raw query and classifies intent.
+    Routes queries to specific agent domains (KNOWLEDGE_QUERY, COMPLIANCE_QUERY, DIRECT_SEARCH).
+    """
+
+    def __init__(self, mcp_manager: MCPClientManager):
         self.mcp = mcp_manager
 
     async def classify(self, query: str) -> dict[str, Any]:
-        """Classify a user query into a routing category using Ollama."""
-        import asyncio
-        loop = asyncio.get_event_loop()
+        """
+        Use an LLM to classify intent and extract basic entities.
+        """
+        if not NVIDIA_API_KEY:
+            logger.warning("NVIDIA_API_KEY not set. Defaulting to KNOWLEDGE_QUERY.")
+            return {"category": "KNOWLEDGE_QUERY", "entities_detected": []}
 
-        def _classify():
-            result = ollama.json_chat(
-                prompt=CLASSIFY_PROMPT.format(query=query),
-                system=SYSTEM_PROMPT,
-                temperature=0.0,        # Zero temp for deterministic routing
-            )
+        system_prompt = (
+            "You are a routing agent for an industrial plant intelligence platform. "
+            "Analyze the user's query and classify it into exactly one of these categories: "
+            "1. 'COMPLIANCE_QUERY': Questions about regulations, standards, audits, gaps (e.g., OISD, Factory Act). "
+            "2. 'DIRECT_SEARCH': Requests explicitly asking for a file, P&ID, manual, or drawing without needing a summarized answer. "
+            "3. 'KNOWLEDGE_QUERY': General questions about operations, troubleshooting, equipment status, or how things work. "
+            "Also, extract any mentioned equipment tags (e.g., P-101A, TK-200) into a list. "
+            "Respond ONLY with valid JSON in this format: {\"category\": \"...\", \"entities_detected\": [\"...\"]}"
+        )
 
-            if not result or not isinstance(result, dict):
-                logger.warning(f"Router returned invalid JSON, defaulting to KNOWLEDGE_QUERY")
-                return {
-                    "category": "KNOWLEDGE_QUERY",
-                    "reasoning": "Classification failed, defaulting",
-                    "entities_detected": [],
-                    "intent": query,
-                }
-
-            # Validate category
-            valid_categories = {"KNOWLEDGE_QUERY", "MAINTENANCE_QUERY", "COMPLIANCE_QUERY", "LESSONS_QUERY", "INGESTION"}
-            if result.get("category") not in valid_categories:
-                result["category"] = "KNOWLEDGE_QUERY"
-
-            return result
+        headers = {
+            "Authorization": f"Bearer {NVIDIA_API_KEY}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        
+        payload = {
+            "model": LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 512,
+        }
 
         try:
-            return await loop.run_in_executor(None, _classify)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(f"{NVIDIA_BASE_URL}/chat/completions", headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                
+                # Strip markdown fences if present
+                content = content.strip()
+                if content.startswith("```"):
+                    parts = content.split("```")
+                    if len(parts) >= 3:
+                        inner = parts[1]
+                        if inner.startswith("json"):
+                            inner = inner[4:]
+                        content = inner.strip()
+                        
+                return json.loads(content)
         except Exception as e:
-            logger.error(f"Router error: {e}")
-            return {
-                "category": "KNOWLEDGE_QUERY",
-                "reasoning": f"Router error: {e}",
-                "entities_detected": [],
-                "intent": query,
-            }
+            logger.error(f"Router LLM classification failed: {e}")
+            return {"category": "KNOWLEDGE_QUERY", "entities_detected": []}

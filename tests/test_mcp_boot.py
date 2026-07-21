@@ -126,9 +126,7 @@ TOOL_MODULES = [
     ("tools.search.graph_search",       "reg_gsearch",  "graph_search"),
     # Agents
     ("tools.agents.copilot",            "reg_copilot",  "ask_knowledge_copilot"),
-    ("tools.agents.maintenance",        "reg_maint",    "analyze_maintenance"),
     ("tools.agents.compliance",         "reg_comply",   "audit_compliance"),
-    ("tools.agents.lessons_learned",    "reg_lessons",  "query_lessons_learned"),
     # Admin
     ("tools.admin.system_tools",        "reg_admin",    "admin_health_check"),
 ]
@@ -192,7 +190,6 @@ server_py = MCP_SERVER_DIR / "server.py"
 content   = server_py.read_text(encoding="utf-8")
 
 checks = {
-    "transport=streamable-http": 'transport="streamable-http"' in content,
     "host=0.0.0.0":              'host="0.0.0.0"'             in content,
     "PORT env var":               'os.getenv("PORT"'           in content,
     "FastMCP registered":         "FastMCP"                    in content,

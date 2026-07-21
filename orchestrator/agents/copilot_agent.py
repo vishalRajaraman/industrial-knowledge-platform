@@ -37,7 +37,7 @@ class CopilotAgent:
             }
             
         # 3. Generate Answer (Server 4)
-        answer_res = await self.mcp.call_tool("copilot", "generate_answer", {
+        answer_res = await self.mcp.call_tool("copilot", "rag_answer", {
             "query": query,
             "context_chunks": context_chunks,
             "user_role": user_role

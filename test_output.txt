@@ -1,0 +1,217 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\vishal rajaraman\Desktop\industrial-knowledge-platform
+plugins: anyio-4.11.0, langsmith-0.4.31, asyncio-1.4.0, html-4.2.0, metadata-3.1.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 17 items
+
+tests\mistral_brain_test.py FFFF                                         [ 23%]
+tests\test_drawing.py F                                                  [ 29%]
+tests\test_watcher.py F..FF.......                                       [100%]
+
+================================== FAILURES ===================================
+_______________________________ test_basic_chat _______________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+_____________________________ test_streaming_chat _____________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+_______________________________ test_json_mode ________________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+___________________________ test_industrial_domain ____________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+____________________________________ test _____________________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+_________ TestLocalWatcher.test_watch_nonexistent_folder_auto_creates _________
+
+self = <test_watcher.TestLocalWatcher object at 0x0000015C4F832650>
+tmp_path = WindowsPath('C:/Users/vishal rajaraman/AppData/Local/Temp/pytest-of-vishal rajaraman/pytest-3/test_watch_nonexistent_folder_0')
+
+    @pytest.mark.asyncio
+    async def test_watch_nonexistent_folder_auto_creates(self, tmp_path):
+        """watch_local_folder should auto-create the target folder if missing."""
+>       from mcp_server.tools.ingestion import watcher  # noqa: F401 — ensure clean import
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       ModuleNotFoundError: No module named 'mcp_server'
+
+C:\Users\vishal rajaraman\Desktop\industrial-knowledge-platform\tests\test_watcher.py:46: ModuleNotFoundError
+_________________ TestLocalWatcher.test_stop_watching_folder __________________
+
+self = <test_watcher.TestLocalWatcher object at 0x0000015C4F88CF50>
+tmp_path = WindowsPath('C:/Users/vishal rajaraman/AppData/Local/Temp/pytest-of-vishal rajaraman/pytest-3/test_stop_watching_folder0')
+
+    @pytest.mark.asyncio
+    async def test_stop_watching_folder(self, tmp_path):
+        """stop_watching_folder should cleanly cancel the watcher."""
+        from tools.ingestion.watcher import register, _active_watchers
+        _active_watchers.clear()
+    
+        registered_tools: dict = {}
+    
+        class FakeMCP:
+            def tool(self):
+                def decorator(fn):
+                    registered_tools[fn.__name__] = fn
+                    return fn
+                return decorator
+    
+        register(FakeMCP())
+    
+        with patch("tools.ingestion.watcher._process_file", new_callable=AsyncMock):
+            await registered_tools["watch_local_folder"](
+                folder_path=str(tmp_path), scan_existing=False
+            )
+            folder_str = str(tmp_path.resolve())
+            assert folder_str in _active_watchers
+    
+>           result = await registered_tools["stop_watching_folder"](folder_path=str(tmp_path))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\vishal rajaraman\Desktop\industrial-knowledge-platform\tests\test_watcher.py:174: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+folder_path = 'C:\\Users\\vishal rajaraman\\AppData\\Local\\Temp\\pytest-of-vishal rajaraman\\pytest-3\\test_stop_watching_folder0'
+
+    @mcp.tool()
+    async def stop_watching_folder(folder_path: str = "") -> dict:
+        """
+        Stop monitoring a local folder that was started with watch_local_folder.
+    
+        Args:
+            folder_path: The folder path to stop (defaults to WATCH_FOLDER env var).
+        """
+        target = str(Path(folder_path or _DEFAULT_WATCH_FOLDER).resolve())
+    
+        if target not in _active_watchers:
+            return {"status": "not_watching", "folder": target}
+    
+        entry = _active_watchers.pop(target)
+    
+        # Stop watchdog observer thread
+>       entry["observer"].stop()
+        ^^^^^^^^^^^^^^^^^
+E       KeyError: 'observer'
+
+C:\Users\vishal rajaraman\Desktop\industrial-knowledge-platform\mcp-server\tools\ingestion\watcher.py:287: KeyError
+------------------------------ Captured log call ------------------------------
+INFO     industreak-mcp.watcher:watcher.py:210 watch_local_folder called with path: C:\Users\vishal rajaraman\AppData\Local\Temp\pytest-of-vishal rajaraman\pytest-3\test_stop_watching_folder0
+INFO     industreak-mcp.watcher:watcher.py:255 Successfully activated polling watcher!
+INFO     industreak-mcp.watcher:watcher.py:140 Polling watcher ready for: C:\Users\vishal rajaraman\AppData\Local\Temp\pytest-of-vishal rajaraman\pytest-3\test_stop_watching_folder0
+_________________ TestLocalWatcher.test_list_active_watchers __________________
+
+self = <test_watcher.TestLocalWatcher object at 0x0000015C4F88D7D0>
+tmp_path = WindowsPath('C:/Users/vishal rajaraman/AppData/Local/Temp/pytest-of-vishal rajaraman/pytest-3/test_list_active_watchers0')
+
+    @pytest.mark.asyncio
+    async def test_list_active_watchers(self, tmp_path):
+        """list_active_watchers should report all active watchers."""
+        from tools.ingestion.watcher import register, _active_watchers
+        _active_watchers.clear()
+    
+        registered_tools: dict = {}
+    
+        class FakeMCP:
+            def tool(self):
+                def decorator(fn):
+                    registered_tools[fn.__name__] = fn
+                    return fn
+                return decorator
+    
+        register(FakeMCP())
+    
+        with patch("tools.ingestion.watcher._process_file", new_callable=AsyncMock):
+            await registered_tools["watch_local_folder"](
+                folder_path=str(tmp_path), scan_existing=False
+            )
+>           result = await registered_tools["list_active_watchers"]()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+C:\Users\vishal rajaraman\Desktop\industrial-knowledge-platform\tests\test_watcher.py:200: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+C:\Users\vishal rajaraman\Desktop\industrial-knowledge-platform\mcp-server\tools\ingestion\watcher.py:308: in list_active_watchers
+    "local_watchers": [
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <dict_itemiterator object at 0x0000015C4F2372E0>
+
+        "local_watchers": [
+            {
+                "folder": k,
+                "recursive": v["recursive"],
+                "active": not v["task"].done(),
+>               "queue_depth": v["queue"].qsize(),
+                               ^^^^^^^^^^
+            }
+            for k, v in _active_watchers.items()
+        ],
+        "total": len(_active_watchers),
+    }
+E   KeyError: 'queue'
+
+C:\Users\vishal rajaraman\Desktop\industrial-knowledge-platform\mcp-server\tools\ingestion\watcher.py:313: KeyError
+------------------------------ Captured log call ------------------------------
+INFO     industreak-mcp.watcher:watcher.py:210 watch_local_folder called with path: C:\Users\vishal rajaraman\AppData\Local\Temp\pytest-of-vishal rajaraman\pytest-3\test_list_active_watchers0
+INFO     industreak-mcp.watcher:watcher.py:255 Successfully activated polling watcher!
+INFO     industreak-mcp.watcher:watcher.py:140 Polling watcher ready for: C:\Users\vishal rajaraman\AppData\Local\Temp\pytest-of-vishal rajaraman\pytest-3\test_list_active_watchers0
+============================== warnings summary ===============================
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\core\unchecked_base_model.py:163: 14 warnings
+  C:\Users\vishal rajaraman\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\core\unchecked_base_model.py:163: PydanticDeprecatedSince20: The `__fields__` attribute is deprecated, use the `model_fields` class property instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    if inner_type.__fields__[metadata.discriminant].default == objects_discriminant:
+
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\core\pydantic_utilities.py:240: 14 warnings
+  C:\Users\vishal rajaraman\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\core\pydantic_utilities.py:240: PydanticDeprecatedSince211: Accessing the 'model_fields' attribute on the instance is deprecated. Instead, you should access this attribute from the model class. Deprecated in Pydantic V2.11 to be removed in V3.0.
+    return cast(Mapping[str, PydanticField], model.model_fields)  # type: ignore[attr-defined]
+
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\utils.py:233
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\utils.py:233
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\utils.py:233
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\utils.py:233
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\utils.py:233
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\utils.py:233
+..\..\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\utils.py:233
+  C:\Users\vishal rajaraman\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\cohere\utils.py:233: PydanticDeprecatedSince20: The `parse_obj` method is deprecated; use `model_validate` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    embeddings_by_type_merged = EmbedByTypeResponseEmbeddings.parse_obj(merged_dicts)
+
+..\..\.cache\torch\hub\ultralytics_yolov5_master\utils\plots.py:18
+  C:\Users\vishal rajaraman/.cache\torch\hub\ultralytics_yolov5_master\utils\plots.py:18: DeprecationWarning: Please import `gaussian_filter1d` from the `scipy.ndimage` namespace; the `scipy.ndimage.filters` namespace is deprecated and will be removed in SciPy 2.0.0.
+    from scipy.ndimage.filters import gaussian_filter1d
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/mistral_brain_test.py::test_basic_chat - Failed: async def funct...
+FAILED tests/mistral_brain_test.py::test_streaming_chat - Failed: async def f...
+FAILED tests/mistral_brain_test.py::test_json_mode - Failed: async def functi...
+FAILED tests/mistral_brain_test.py::test_industrial_domain - Failed: async de...
+FAILED tests/test_drawing.py::test - Failed: async def functions are not nati...
+FAILED tests/test_watcher.py::TestLocalWatcher::test_watch_nonexistent_folder_auto_creates
+FAILED tests/test_watcher.py::TestLocalWatcher::test_stop_watching_folder - K...
+FAILED tests/test_watcher.py::TestLocalWatcher::test_list_active_watchers - K...
+============ 8 failed, 9 passed, 36 warnings in 148.43s (0:02:28) =============

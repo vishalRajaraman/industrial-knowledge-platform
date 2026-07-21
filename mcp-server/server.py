@@ -76,9 +76,7 @@ from tools.search.hybrid_search import register as reg_hybrid
 from tools.search.graph_search import register as reg_gsearch
 
 from tools.agents.copilot import register as reg_copilot
-from tools.agents.maintenance import register as reg_maint
 from tools.agents.compliance import register as reg_comply
-from tools.agents.lessons_learned import register as reg_lessons
 
 from tools.admin.system_tools import register as reg_admin
 
@@ -87,7 +85,7 @@ for register_fn in [
     reg_ner, reg_chunker, reg_embed, reg_triplet, reg_reg, reg_hier,
     reg_vector, reg_graph, reg_asset,
     reg_hybrid, reg_gsearch,
-    reg_copilot, reg_maint, reg_comply, reg_lessons,
+    reg_copilot, reg_comply,
     reg_admin,
 ]:
     register_fn(mcp)

@@ -9,7 +9,7 @@ def configure_middleware(app: FastAPI, settings: GatewaySettings) -> None:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins,
-        allow_credentials=False,
+        allow_credentials=True,  # Required for httpOnly cookie auth (credentials: "include")
         allow_methods=["*"],
         allow_headers=["*"],
     )

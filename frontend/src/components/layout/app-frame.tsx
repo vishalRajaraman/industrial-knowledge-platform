@@ -23,10 +23,25 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  if (!ready || !session) {
+  if (!ready) {
     return (
-      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
-        Loading secure workspace...
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", flexDirection: "column", gap: "1rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem" }}>
+          <div style={{ width: "48px", height: "48px", border: "3px solid var(--border-color)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          <p style={{ color: "var(--text-muted)", fontSize: "0.95rem" }}>Connecting to secure workspace...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    // Session check resolved but no session — redirect happens via useEffect above
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem" }}>
+          <p style={{ color: "var(--text-muted)" }}>Redirecting to login...</p>
+        </div>
       </div>
     );
   }

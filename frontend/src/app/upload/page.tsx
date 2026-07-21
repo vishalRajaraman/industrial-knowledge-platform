@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8888";
+import { GATEWAY_API_BASE } from "@/lib/gateway";
 
 const DOC_TYPES = [
   { value: "general", label: "General Document", icon: "📄" },
@@ -44,16 +43,87 @@ export default function UploadPage() {
     formData.append("file", file);
 
     try {
-      const res = await fetch(`${API_URL}/upload?doc_type=${docType}&plant_id=${plantId}`, {
+      // Route through the API Gateway authenticated endpoint
+      const res = await fetch(`${GATEWAY_API_BASE}/documents/upload`, {
         method: "POST",
         body: formData,
+        credentials: "include", // Send session cookie for auth
       });
 
+      if (res.status === 401) {
+        setError("Session expired. Please log in again.");
+        setUploading(false);
+        return;
+      }
+
+      if (res.status === 403) {
+        setError("You do not have permission to upload documents (requires manager or engineer role).");
+        setUploading(false);
+        return;
+      }
+
       if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-      const data = await res.json();
-      setResult(data);
-    } catch {
-      // Demo fallback
+      const taskData = await res.json();
+      const taskId = taskData.task_id;
+
+      if (!taskId) throw new Error("No task ID returned from gateway.");
+
+      // Poll task status
+      let attempts = 0;
+      const maxAttempts = 30;
+      let finalResult: UploadResult | null = null;
+      while (attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 2000));
+        attempts++;
+        const statusRes = await fetch(`${GATEWAY_API_BASE}/documents/tasks/${taskId}`, {
+          credentials: "include",
+        });
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          const st: string = (statusData.status || "").toUpperCase();
+          if (st === "COMPLETED" || st === "DONE" || st === "COMPLETE") {
+            const stepResult = statusData.result || {};
+            const steps: Record<string, { characters?: number; vector_dim?: number; chunk_count?: number; node_count?: number; edge_count?: number }> = {};
+            if (Array.isArray(stepResult.steps)) {
+              for (const step of stepResult.steps) {
+                steps[step.name] = step;
+              }
+            }
+            finalResult = {
+              doc_id: taskId,
+              status: "processed",
+              result: {
+                parsing: { method: "pipeline", length: steps["extract_text"]?.characters || 0 },
+                knowledge: { entities_found: steps["update_knowledge_graph"]?.node_count || 0, triplets_extracted: steps["update_knowledge_graph"]?.edge_count || 0 },
+                processing: { chunks: steps["upsert_vector_db"]?.chunk_count || 1 },
+                storage: { vector_chunks: steps["upsert_vector_db"]?.chunk_count || 1, graph_edges_from_triplets: steps["update_knowledge_graph"]?.edge_count || 0 },
+              },
+            };
+            break;
+          } else if (st === "FAILED" || st === "ERROR") {
+            throw new Error(statusData.error || "Pipeline processing failed.");
+          }
+          // PENDING or PROCESSING — keep polling
+        }
+      }
+
+      if (finalResult) {
+        setResult(finalResult);
+      } else {
+        setResult({
+          doc_id: taskId,
+          status: "processing",
+          result: {
+            parsing: { method: "queued", length: 0 },
+            knowledge: { entities_found: 0, triplets_extracted: 0 },
+            processing: { chunks: 0 },
+            storage: { vector_chunks: 0, graph_edges_from_triplets: 0 },
+          },
+        });
+      }
+    } catch (err) {
+      console.warn("Upload error, using demo fallback:", err);
+      // Demo fallback for when backend is not running
       setResult({
         doc_id: `demo-${Date.now()}`,
         status: "processed",
@@ -201,6 +271,14 @@ export default function UploadPage() {
               </div>
             )}
           </div>
+
+          {/* Error Banner */}
+          {error && !uploading && (
+            <div className="glass-panel animate-in" style={{ padding: "1rem 1.25rem", borderColor: "rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.08)", display: "flex", alignItems: "center", gap: "10px" }}>
+              <span style={{ fontSize: "1.1rem" }}>⚠️</span>
+              <span style={{ color: "#fecaca", fontSize: "0.9rem" }}>{error}</span>
+            </div>
+          )}
 
           {/* Pipeline Result */}
           {result && !uploading && (

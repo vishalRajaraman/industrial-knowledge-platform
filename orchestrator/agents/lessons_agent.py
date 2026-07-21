@@ -16,7 +16,7 @@ class LessonsAgent:
         logger.info("Lessons agent processing query.")
         
         # Analyze near misses / incident patterns
-        analysis_res = await self.mcp.call_tool("compliance", "analyze_near_misses", {
+        analysis_res = await self.mcp.call_tool("compliance", "lessons_analyze_near_misses", {
             "query": query
         })
         
@@ -47,7 +47,7 @@ class LessonsAgent:
             
         # Check if we should generate an alert
         if any(p.get("severity", "").lower() == "high" for p in patterns):
-            alert_res = await self.mcp.call_tool("compliance", "generate_safety_alert", {
+            alert_res = await self.mcp.call_tool("compliance", "lessons_generate_safety_alert", {
                 "patterns": patterns
             })
             if alert_res.get("alert_generated"):

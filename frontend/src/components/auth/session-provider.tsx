@@ -10,7 +10,7 @@ type SessionContextValue = {
   isAuthenticated: boolean;
   setSession: (session: AuthSession | null) => void;
   logout: () => Promise<void>;
-  refreshFromServer: () => Promise<void>;
+  refreshFromServer: () => Promise<boolean>;
 };
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -19,14 +19,22 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [ready, setReady] = useState(false);
 
-  const refreshFromServer = useCallback(async () => {
+  const refreshFromServer = useCallback(async (): Promise<boolean> => {
+    let success = false;
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const res = await fetch(`${GATEWAY_API_BASE}/auth/me`, {
         credentials: "include",
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
+      
       if (res.ok) {
         const data = await res.json();
         setSession(data);
+        success = true;
       } else {
         setSession(null);
       }
@@ -35,10 +43,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setReady(true);
     }
+    return success;
   }, []);
 
   useEffect(() => {
-    refreshFromServer();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshFromServer();
   }, [refreshFromServer]);
 
   const value = useMemo<SessionContextValue>(() => ({
@@ -49,7 +59,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     logout: async () => {
       try {
         await fetch(`${GATEWAY_API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
-      } catch (e) {
+      } catch {
         // Ignore network errors on logout
       }
       setSession(null);

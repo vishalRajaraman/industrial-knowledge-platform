@@ -15,7 +15,7 @@ async def post_vector_search(
     request: VectorSearchRequest,
     current_user: AuthenticatedUser = Depends(require_roles(*SYSTEM_ROLES)),
 ) -> SearchStubResponse:
-    return build_vector_search_stub(request)
+    return await build_vector_search_stub(request)
 
 
 @router.post("/graph", response_model=SearchStubResponse)
@@ -23,4 +23,4 @@ async def post_graph_search(
     request: GraphSearchRequest,
     current_user: AuthenticatedUser = Depends(require_roles("manager", "engineer")),
 ) -> SearchStubResponse:
-    return build_graph_search_stub(request)
+    return await build_graph_search_stub(request)
