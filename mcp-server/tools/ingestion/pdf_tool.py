@@ -167,6 +167,7 @@ async def ingest_pdf(
             "regulatory_references": [e["text"] for e in entities.get("regulatory_references", [])],
             "failure_modes": [e["text"] for e in entities.get("failure_modes", [])],
             "chemicals": [e["text"] for e in entities.get("chemicals", [])],
+            "persons": [e["text"] for e in entities.get("persons", [])],
         },
     )
 
@@ -206,6 +207,20 @@ async def ingest_pdf(
         await neo4j_client.upsert_edge(doc_id, chem_name, "INVOLVES_CHEMICAL")
         kg_nodes += 2
 
+    # 8f. Persons
+    for person in entities.get("persons", []):
+        person_name = person["text"]
+        await neo4j_client.upsert_node(person_name, ["Person"], {"name": person_name})
+        await neo4j_client.upsert_edge(doc_id, person_name, "MENTIONS_PERSON")
+        kg_nodes += 2
+
+    # Collect flat entities for the frontend
+    entities_extracted = []
+    for cat, items in entities.items():
+        if isinstance(items, list):
+            for item in items:
+                entities_extracted.append({"text": item["text"], "label": cat})
+
     return {
         "doc_id": doc_id,
         "filename": path.name,
@@ -214,6 +229,7 @@ async def ingest_pdf(
         "chunk_count": len(chunks),
         "vectors_upserted": upsert_result.get("upserted", 0),
         "entity_count": sum(len(v) for v in entities.values() if isinstance(v, list)),
+        "entities_extracted": entities_extracted,
         "kg_nodes_created": kg_nodes,
         "s3_url": s3_url,
     }

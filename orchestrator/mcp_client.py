@@ -13,12 +13,12 @@ import httpx
 logger = logging.getLogger("mcp-client")
 
 MCP_SERVERS = {
-    "ingestion": os.getenv("MCP_INGESTION_URL", "http://localhost:8001"),
-    "knowledge": os.getenv("MCP_KNOWLEDGE_URL", "http://localhost:8002"),
-    "storage": os.getenv("MCP_STORAGE_URL", "http://localhost:8003"),
-    "copilot": os.getenv("MCP_COPILOT_URL", "http://localhost:8004"),
-    "maintenance": os.getenv("MCP_MAINTENANCE_URL", "http://localhost:8005"),
-    "compliance": os.getenv("MCP_COMPLIANCE_URL", "http://localhost:8006"),
+    "ingestion": os.getenv("MCP_INGESTION_URL", "http://127.0.0.1:9090"),
+    "knowledge": os.getenv("MCP_KNOWLEDGE_URL", "http://127.0.0.1:9090"),
+    "storage": os.getenv("MCP_STORAGE_URL", "http://127.0.0.1:9090"),
+    "copilot": os.getenv("MCP_COPILOT_URL", "http://127.0.0.1:9090"),
+    "maintenance": os.getenv("MCP_MAINTENANCE_URL", "http://127.0.0.1:9090"),
+    "compliance": os.getenv("MCP_COMPLIANCE_URL", "http://127.0.0.1:9090"),
 }
 
 

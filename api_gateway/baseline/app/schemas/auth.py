@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-AuthRole = Literal["field_tech", "manager", "engineer"]
+AuthRole = Literal["plant admin", "engineer"]
 
 
 class LoginRequest(BaseModel):

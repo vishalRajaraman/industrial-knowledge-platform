@@ -5,12 +5,28 @@ import { useRouter } from 'next/navigation';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const GATEWAY_API_BASE = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:8100/api/v1';
 
+interface ComplianceGap {
+  clause: string;
+  requirement: string;
+  severity: 'High' | 'Medium' | 'Low';
+  current_state: string;
+  recommendation: string;
+}
+
+interface ComplianceResult {
+  framework: string;
+  overall_coverage: number;
+  summary: string;
+  docs_checked: number;
+  gaps: ComplianceGap[];
+  sources: { id?: string; title?: string; doc_type?: string }[];
+}
+
 interface DashboardStats {
   totalDocuments: number | null;
   graphNodes: number | null;
   graphEdges: number | null;
   complianceGaps: number | null;
-  predictiveAlerts: number | null;
   mcpStatus: 'online' | 'offline' | 'loading';
   orchestratorStatus: 'online' | 'offline' | 'loading';
 }
@@ -57,10 +73,49 @@ export default function Dashboard() {
     graphNodes: null,
     graphEdges: null,
     complianceGaps: null,
-    predictiveAlerts: null,
     mcpStatus: 'loading',
     orchestratorStatus: 'loading',
   });
+  
+  // Compliance Auditor State
+  const [framework, setFramework] = useState('OISD_154');
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [results, setResults] = useState<ComplianceResult | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
+
+  const runAudit = async () => {
+    setIsAuditing(true);
+    setAuditError(null);
+    try {
+      const queryStr = `Check compliance gaps for framework ${framework} targeting All Plant`;
+      const res = await fetch(`${API_URL}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: queryStr, user_role: 'auditor', regulation: framework })
+      });
+      if (!res.ok) throw new Error('API Error');
+      const data = await res.json();
+      const meta = data.metadata || {};
+      const resultsData = meta.results || meta || {};
+      const gapCount = meta.gap_count ?? (resultsData.gaps?.length ?? 0);
+      const rawCoverage = resultsData.overall_coverage ?? (gapCount === 0 ? 1.0 : Math.max(0, 1 - gapCount * 0.1));
+      const coverage = rawCoverage > 1 ? rawCoverage / 100 : rawCoverage;
+      setResults({
+        framework: framework,
+        overall_coverage: coverage,
+        summary: resultsData.summary || data.answer || "Compliance analysis complete.",
+        docs_checked: resultsData.docs_checked ?? (data.sources?.length ?? 0),
+        gaps: resultsData.gaps || [],
+        sources: data.sources || [],
+      });
+      setStats(prev => ({ ...prev, complianceGaps: gapCount }));
+    } catch (err) {
+      console.error(err);
+      setAuditError("Failed to run audit. Ensure the InduStreakAI Orchestrator is running.");
+      setResults(null);
+    }
+    setIsAuditing(false);
+  };
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
 
@@ -95,11 +150,11 @@ export default function Dashboard() {
       if (graphRes.status === 'fulfilled' && graphRes.value.ok) {
         const graphData = await graphRes.value.json();
         // Parse node counts from Cypher result
-        const nodes = graphData?.nodes?.result || graphData?.nodes || [];
+        const nodes = graphData?.nodes?.results || graphData?.nodes || [];
         if (Array.isArray(nodes)) {
           nodeCount = nodes.reduce((sum: number, row: { cnt?: number }) => sum + (Number(row.cnt) || 0), 0);
         }
-        const edges = graphData?.edges?.result || graphData?.edges;
+        const edges = graphData?.edges?.results || graphData?.edges;
         if (edges && typeof edges === 'object') {
           edgeCount = Number(edges.total_edges ?? edges[0]?.total_edges ?? 0) || null;
         }
@@ -119,40 +174,10 @@ export default function Dashboard() {
     } catch {
       setStats(prev => ({ ...prev, orchestratorStatus: 'offline', mcpStatus: 'offline' }));
     }
-
-    // 2. Fetch compliance gap count via query
-    try {
-      const compRes = await fetch(`${API_URL}/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: 'How many compliance gaps are currently detected?', user_role: 'auditor' }),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (compRes.ok) {
-        const compData = await compRes.json();
-        const gapCount = compData?.metadata?.gap_count ?? null;
-        setStats(prev => ({ ...prev, complianceGaps: gapCount !== null ? Number(gapCount) : 0 }));
-      }
-    } catch {
-      setStats(prev => ({ ...prev, complianceGaps: 0 }));
-    }
-
-    // 3. Fetch predictive alerts count
-    try {
-      const alertRes = await fetch(`${API_URL}/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: 'How many equipment are currently in alert or critical state?', user_role: 'operator' }),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (alertRes.ok) {
-        const alertData = await alertRes.json();
-        const alertCount = alertData?.metadata?.alert_count ?? null;
-        setStats(prev => ({ ...prev, predictiveAlerts: alertCount !== null ? Number(alertCount) : 0 }));
-      }
-    } catch {
-      setStats(prev => ({ ...prev, predictiveAlerts: 0 }));
-    }
+    
+    // 2. Prevent server blocking on mount by removing concurrent heavy LLM audits.
+    // Compliance gaps will now be updated when the user manually runs the audit.
+    setStats(prev => ({ ...prev, complianceGaps: 0 }));
   }, []);
 
   const fetchActivity = useCallback(async () => {
@@ -253,69 +278,111 @@ export default function Dashboard() {
             label="Compliance Gaps"
             value={stats.complianceGaps}
             color={stats.complianceGaps !== null && stats.complianceGaps > 0 ? 'var(--warning)' : 'var(--success)'}
-            sub="OISD-144 & ISO-55001"
+            sub="All Regulatory Frameworks"
             icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>}
-          />
-        </div>
-        <div className="stagger-3">
-          <StatCard
-            label="Predictive Alerts"
-            value={stats.predictiveAlerts}
-            color={stats.predictiveAlerts !== null && stats.predictiveAlerts > 0 ? 'var(--danger)' : 'var(--success)'}
-            sub={stats.predictiveAlerts !== null && stats.predictiveAlerts > 0 ? 'Equipment requires attention' : 'All equipment nominal'}
-            icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>}
           />
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem' }}>
-        {/* Ask Copilot Section */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem' }}>
+        {/* Quality & Compliance Auditor */}
         <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column' }}>
-          <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-            </div>
-            Ask IKP Copilot
+          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Quality & Compliance Auditor
           </h2>
-
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-              <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Suggested Queries:</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
-                {[
-                  'Why is Pump P-101 vibrating?',
-                  "Generate RCA for yesterday's shutdown",
-                  'Show compliance gaps for Fire Systems',
-                ].map(q => (
-                  <span
-                    key={q}
-                    onClick={() => setQuery(q)}
-                    style={{ background: 'rgba(56, 189, 248, 0.1)', color: 'var(--accent)', padding: '0.5rem 1rem', borderRadius: '20px', fontSize: '0.875rem', cursor: 'pointer', border: '1px solid rgba(56, 189, 248, 0.2)' }}
-                  >
-                    {q}
-                  </span>
-                ))}
-              </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: 1 }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>Regulatory Framework</label>
+              <select 
+                value={framework}
+                onChange={(e) => setFramework(e.target.value)}
+                style={{ width: '100%', padding: '0.875rem', borderRadius: '8px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-color)', color: 'white', outline: 'none' }}
+              >
+                <option value="OISD_154">OISD 154 — Safety Management System</option>
+                <option value="OISD_STD_144">OISD STD 144 — Fire Prevention & Protection</option>
+                <option value="Factory_Act_1948">Factory Act 1948</option>
+                <option value="ISO_55001">ISO 55001 — Asset Management</option>
+              </select>
             </div>
-          </div>
-
-          <div style={{ position: 'relative' }}>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="Ask anything about assets, procedures, or compliance..."
-              style={{ width: '100%', padding: '1.25rem', paddingRight: '4rem', borderRadius: '12px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: 'white', fontSize: '1rem', outline: 'none' }}
-            />
-            <button
-              onClick={handleSearch}
-              style={{ position: 'absolute', right: '12px', top: '12px', background: 'var(--primary)', color: 'white', width: '40px', height: '40px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            <button 
+              onClick={runAudit}
+              disabled={isAuditing}
+              className="btn-primary" 
+              style={{ height: '46px', marginTop: '0.5rem' }}
+            >
+              {isAuditing ? (
+                <><span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>↻</span> Auditing...</>
+              ) : (
+                <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: '8px' }}><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg> Run Auto-Audit</>
+              )}
             </button>
+            {auditError && <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', fontSize: '0.875rem' }}>{auditError}</div>}
+            
+            {results && (
+              <div className="animate-in" style={{ marginTop: '1rem', padding: '1.25rem', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <div style={{ fontWeight: 600 }}>Compliance Score</div>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: results.overall_coverage > 0.8 ? 'var(--success)' : 'var(--warning)' }}>
+                    {Math.round(results.overall_coverage * 100)}%
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                  Analyzed {results.docs_checked} documents. Found {results.gaps.length} gaps.
+                </div>
+                <button 
+                  className="btn-secondary" 
+                  style={{ width: '100%', fontSize: '0.875rem' }} 
+                  onClick={() => {
+                    const el = document.getElementById('audit-summary-details');
+                    if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+                  }}
+                >
+                  Toggle Executive Summary
+                </button>
+                <div id="audit-summary-details" className="animate-in" style={{ display: 'none', marginTop: '1rem' }}>
+                  <div style={{ padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', borderLeft: '3px solid var(--accent)', fontSize: '0.875rem', lineHeight: '1.6', color: 'var(--text-main)', whiteSpace: 'pre-wrap', marginBottom: '1rem' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-muted)' }}>Audit Summary</div>
+                    {results.summary.replace(/\*\*/g, '').replace(/### /g, '').replace(/#/g, '')}
+                  </div>
+                  
+                  {results.gaps && results.gaps.length > 0 && (
+                    <div style={{ marginBottom: '1rem' }}>
+                      <div style={{ fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>Detected Gaps</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {results.gaps.map((gap, i) => (
+                          <div key={i} style={{ padding: '1rem', background: 'rgba(15, 23, 42, 0.4)', borderRadius: '8px', border: '1px solid var(--border-color)', borderLeft: `3px solid ${gap.severity === 'High' ? 'var(--danger)' : gap.severity === 'Medium' ? 'var(--warning)' : 'var(--success)'}` }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                              <strong style={{ fontSize: '0.9rem' }}>Clause {gap.clause}</strong>
+                              <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', background: 'rgba(255,255,255,0.1)' }}>{gap.severity} Priority</span>
+                            </div>
+                            <div style={{ fontSize: '0.875rem', color: 'var(--text-main)', marginBottom: '0.5rem' }}><strong>Requirement:</strong> {gap.requirement}</div>
+                            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}><strong>Current State:</strong> {gap.current_state}</div>
+                            <div style={{ fontSize: '0.875rem', color: 'var(--accent)' }}><strong>Recommendation:</strong> {gap.recommendation}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {results.sources && results.sources.length > 0 && (
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>Knowledge Graph Sources</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        {results.sources.map((src, i) => (
+                          <div key={i} style={{ fontSize: '0.75rem', padding: '0.5rem 0.75rem', background: 'rgba(255,255,255,0.05)', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                            {src.id || src.title}
+                            {src.doc_type && <span style={{ opacity: 0.5 }}>({src.doc_type})</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
-
         {/* Recent Activity */}
         <div className="glass-panel" style={{ padding: '2rem' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -368,6 +435,9 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+      `}} />
     </div>
   );
 }

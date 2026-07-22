@@ -156,7 +156,7 @@ async def _extract_entities_impl(text: str, doc_id: str = "") -> dict:
             except Exception as e:
                 logger.error(f"GLiNER prediction failed: {e}")
 
-        logger.info(f"GLiNER Extracted for doc '{doc_id}': Equipment={len(result['equipment_tags'])}, Parameters={len(result['process_parameters'])}, Regulations={len(result['regulatory_references'])}, Failures={len(result['failure_modes'])}, Chemicals={len(result['chemicals'])}")
+        logger.info(f"GLiNER Extracted for doc '{doc_id}': Equipment={len(result['equipment_tags'])}, Parameters={len(result['process_parameters'])}, Regulations={len(result['regulatory_references'])}, Failures={len(result['failure_modes'])}, Chemicals={len(result['chemicals'])}, Persons={len(result['persons'])}")
         if result['equipment_tags']: logger.info(f"Sample Equipment: {[e['text'] for e in result['equipment_tags'][:5]]}")
         if result['process_parameters']: logger.info(f"Sample Parameters: {[e['text'] for e in result['process_parameters'][:3]]}")
         if result['failure_modes']: logger.info(f"Sample Failures: {[e['text'] for e in result['failure_modes'][:3]]}")

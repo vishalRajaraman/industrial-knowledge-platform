@@ -4,8 +4,8 @@ import os
 from typing import Literal
 
 
-SystemRole = Literal["field_tech", "manager", "engineer"]
-SYSTEM_ROLES: tuple[SystemRole, ...] = ("field_tech", "manager", "engineer")
+SystemRole = Literal["plant admin", "engineer"]
+SYSTEM_ROLES: tuple[SystemRole, ...] = ("plant admin", "engineer")
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,8 +16,7 @@ class GatewayUser:
 
 
 DEFAULT_USER_DIRECTORY: dict[str, GatewayUser] = {
-    "field.tech": GatewayUser(username="field.tech", password="field-tech-pass", role="field_tech"),
-    "manager": GatewayUser(username="manager", password="manager-pass", role="manager"),
+    "admin": GatewayUser(username="admin", password="admin-pass", role="plant admin"),
     "engineer": GatewayUser(username="engineer", password="engineer-pass", role="engineer"),
 }
 

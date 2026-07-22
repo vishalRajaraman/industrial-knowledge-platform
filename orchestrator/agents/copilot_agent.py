@@ -16,17 +16,19 @@ class CopilotAgent:
         logger.info(f"Copilot processing query: {query} (Entities: {entities})")
         
         # 1. Expand Query (Server 4)
-        expand_res = await self.mcp.call_tool("copilot", "expand_query", {"query": query, "user_role": user_role})
+
+
+        expand_res = await self.mcp.call_tool("copilot", "expand_query", {"user_query": query, "user_role": user_role})
         expanded_query = expand_res.get("expanded_query", query)
         
         # 2. Hybrid Search (Server 4)
         search_res = await self.mcp.call_tool("copilot", "hybrid_search", {
             "query": expanded_query,
-            "entities": entities,
+            "equipment_tags": entities,
             "top_k": 5
         })
         
-        context_chunks = search_res.get("results", [])
+        context_chunks = search_res.get("combined_sources", [])
         
         if not context_chunks:
             return {

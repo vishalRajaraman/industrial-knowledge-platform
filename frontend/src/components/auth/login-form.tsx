@@ -17,8 +17,7 @@ const DEFAULT_STATE: LoginFormState = {
 };
 
 const ROLE_HINTS: Record<UserRole, string> = {
-  field_tech: "Quick access to field summaries and operational dashboards.",
-  manager: "Cross-functional search, compliance, and executive-level visibility.",
+  "plant admin": "Cross-functional search, compliance, and executive-level visibility.",
   engineer: "Search, analysis, and deep technical troubleshooting.",
 };
 
@@ -64,15 +63,15 @@ export function LoginForm() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "1.1fr 0.9fr", background: "radial-gradient(circle at top left, rgba(37,99,235,0.25), transparent 40%), linear-gradient(180deg, #050816 0%, #0f172a 48%, #08111f 100%)" }}>
+    <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "1.1fr 0.9fr", background: "radial-gradient(circle at top left, rgba(37,99,235,0.08), transparent 40%), linear-gradient(180deg, #f8fafc 0%, #f1f5f9 48%, #e2e8f0 100%)" }}>
       <section style={{ padding: "4rem", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
         <div>
           <div style={{ display: "inline-flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.5rem" }}>
             <div style={{ width: "42px", height: "42px", borderRadius: "12px", background: "linear-gradient(135deg, var(--primary), var(--accent))", display: "grid", placeItems: "center" }}>
-              <span style={{ fontWeight: 800 }}>IK</span>
+              <span style={{ fontWeight: 800, color: "white" }}>IKP</span>
             </div>
             <div>
-              <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Industrial Knowledge Intelligence</div>
+              <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Industrial Knowledge Platform</div>
               <div style={{ fontSize: "1.35rem", fontWeight: 700 }}>Gateway Auth Portal</div>
             </div>
           </div>
@@ -84,8 +83,8 @@ export function LoginForm() {
           </p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "1rem", marginTop: "2rem" }}>
-          {(["field_tech", "manager", "engineer"] as UserRole[]).map((role) => (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem", marginTop: "2rem", maxWidth: "600px" }}>
+          {(["plant admin", "engineer"] as UserRole[]).map((role) => (
             <div key={role} className="glass-card" style={{ padding: "1rem 1.1rem", minHeight: "110px" }}>
               <div style={{ fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--accent)", marginBottom: "0.5rem" }}>{role}</div>
               <div style={{ fontSize: "0.93rem", lineHeight: 1.6, color: "var(--text-muted)" }}>{ROLE_HINTS[role]}</div>
@@ -108,9 +107,9 @@ export function LoginForm() {
                 value={form.username}
                 onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
                 autoComplete="username"
-                placeholder="manager"
+                placeholder="admin"
                 className="auth-input"
-                style={{ padding: "0.95rem 1rem", borderRadius: "12px", background: "rgba(15, 23, 42, 0.82)", border: "1px solid var(--border-color)", color: "white", outline: "none" }}
+                style={{ padding: "0.95rem 1rem", borderRadius: "12px", background: "rgba(255, 255, 255, 0.82)", border: "1px solid var(--border-color)", color: "var(--text-main)", outline: "none" }}
               />
             </label>
 
@@ -121,9 +120,9 @@ export function LoginForm() {
                 value={form.password}
                 onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                 autoComplete="current-password"
-                placeholder="manager-pass"
+                placeholder="admin-pass"
                 className="auth-input"
-                style={{ padding: "0.95rem 1rem", borderRadius: "12px", background: "rgba(15, 23, 42, 0.82)", border: "1px solid var(--border-color)", color: "white", outline: "none" }}
+                style={{ padding: "0.95rem 1rem", borderRadius: "12px", background: "rgba(255, 255, 255, 0.82)", border: "1px solid var(--border-color)", color: "var(--text-main)", outline: "none" }}
               />
             </label>
 
@@ -138,8 +137,8 @@ export function LoginForm() {
             </button>
           </div>
 
-          <div style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid rgba(255,255,255,0.06)", color: "var(--text-muted)", fontSize: "0.85rem", lineHeight: 1.7 }}>
-            Demo credentials: manager / manager-pass, engineer / engineer-pass, field.tech / field-tech-pass.
+          <div style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid rgba(0,0,0,0.06)", color: "var(--text-muted)", fontSize: "0.85rem", lineHeight: 1.7 }}>
+            Demo credentials: admin / admin-pass, engineer / engineer-pass.
           </div>
         </form>
       </section>

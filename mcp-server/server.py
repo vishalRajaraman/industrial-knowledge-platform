@@ -34,6 +34,9 @@ for _env_path in _env_candidates:
         break
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+import json
 
 # ── Logging ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -92,9 +95,40 @@ for register_fn in [
 
 logger.info("InduStreakAI MCP server initialised — %d tool namespaces loaded", 21)
 
+# ── Custom Hackathon Endpoints ───────────────────────────────────────────────
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request):
+    return JSONResponse({"status": "ok"})
+
+@mcp.custom_route("/call", methods=["POST"])
+async def call_tool(request: Request):
+    try:
+        data = await request.json()
+        params = data.get("params", {})
+        name = params.get("name")
+        args = params.get("arguments", {})
+        
+        result = await mcp.call_tool(name, args)
+        
+        text_output = ""
+        for item in result:
+            if hasattr(item, "text"):
+                text_output += item.text
+            elif isinstance(item, dict) and "text" in item:
+                text_output += item["text"]
+            else:
+                text_output += str(item)
+
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": data.get("id", 1),
+            "result": {"content": [{"type": "text", "text": text_output}]}
+        })
+    except Exception as e:
+        logger.error(f"Error in /call: {e}", exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     logger.info("Starting InduStreakAI MCP server on port %d", port)
-    # By not forcing a transport, FastMCP auto-detects stdio vs HTTP(SSE)
-    # This allows the MCP Inspector to connect via STDIO seamlessly.
-    mcp.run()
+    mcp.run(transport='sse')

@@ -74,20 +74,40 @@ def register(mcp: FastMCP):
                     graph_context[tag] = sg
 
         # ── Step 5: Merge sources ─────────────────────────────────────────────
-        seen_doc_ids = set()
         combined_sources = []
         for hit in vector_hits:
-            did = hit.get("doc_id", "")
-            if did not in seen_doc_ids:
-                seen_doc_ids.add(did)
-                combined_sources.append({
-                    "doc_id": did,
-                    "score": hit["score"],
-                    "text": hit["text"],
-                    "section_title": hit.get("section_title", ""),
-                    "doc_type": hit.get("doc_type", ""),
-                    "equipment_tags": hit.get("equipment_tags", []),
-                })
+            doc_id = hit.get("doc_id", "")
+            filename = hit.get("metadata", {}).get("filename")
+            
+            # Additional fallback to source_path if filename is missing
+            if not filename:
+                source_path = hit.get("metadata", {}).get("source_path")
+                if source_path:
+                    filename = source_path.split("/")[-1].split("\\")[-1]
+            
+            # Fallback to Graph DB if filename is missing from vector metadata
+            if not filename and doc_id:
+                try:
+                    res = await neo4j_client.run_cypher(
+                        "MATCH (d:Document {id: $doc_id}) RETURN d.filename AS fname, d.title AS title",
+                        {"doc_id": doc_id}
+                    )
+                    if res:
+                        filename = res[0].get("fname") or (f"{res[0].get('title')}.pdf" if res[0].get("title") else doc_id)
+                except Exception as e:
+                    logger.warning(f"Failed to lookup filename for {doc_id}: {e}")
+            
+            filename = filename or doc_id
+
+            combined_sources.append({
+                "doc_id": doc_id,
+                "score": hit.get("score", 0.0),
+                "text": hit.get("text", ""),
+                "section_title": hit.get("section_title", ""),
+                "doc_type": hit.get("doc_type", ""),
+                "equipment_tags": hit.get("equipment_tags", []),
+                "filename": filename,
+            })
 
         return {
             "query": query,

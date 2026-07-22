@@ -56,7 +56,7 @@ def register(mcp: FastMCP):
             }
 
         context_str = "\n\n---\n\n".join(
-            f"[{c.get('doc_id', '?')} | {c.get('section_title', '')} | score={c.get('score', 0):.2f}]\n{c.get('text', '')}"
+            f"[{c.get('filename', c.get('doc_id', '?'))} | {c.get('section_title', '')} | score={c.get('score', 0):.2f}]\n{c.get('text', '')}"
             for c in context_chunks[:8]
         )
 
@@ -73,15 +73,21 @@ def register(mcp: FastMCP):
 
         answer_text = await llm_client.chat(prompt=prompt, system=ANSWER_SYSTEM, temperature=0.3)
 
-        sources = [
-            {
-                "doc_id": c.get("doc_id", ""),
+        sources = []
+        import re
+        uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+        
+        for c in context_chunks:
+            fname = c.get("filename") or c.get("doc_id", "")
+            if uuid_pattern.match(fname):
+                fname = "Unknown Document"
+                
+            sources.append({
+                "doc_id": fname,
                 "section_title": c.get("section_title", ""),
                 "doc_type": c.get("doc_type", ""),
                 "score": round(float(c.get("score", 0)), 4),
-            }
-            for c in context_chunks
-        ]
+            })
 
         # Confidence based on source scores
         if sources:
@@ -112,10 +118,17 @@ def register(mcp: FastMCP):
             bibliography: Numbered list of source documents.
         """
         bibliography = []
+        import re
+        uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+        
         for i, chunk in enumerate(source_chunks, 1):
+            did = chunk.get("doc_id", "")
+            if uuid_pattern.match(did):
+                did = "Unknown Document"
+                
             bibliography.append({
                 "ref": i,
-                "doc_id": chunk.get("doc_id", ""),
+                "doc_id": did,
                 "section": chunk.get("section_title", ""),
                 "doc_type": chunk.get("doc_type", ""),
                 "score": round(float(chunk.get("score", 0)), 3),
@@ -166,3 +179,28 @@ def register(mcp: FastMCP):
                 "source_bonus": source_bonus,
             },
         }
+
+    @mcp.tool()
+    async def enhance_user_query(query: str) -> dict:
+        """
+        Enhance a short user query into a fully-formed, professional question
+        using the nvidia/nemotron-4-340b-instruct model.
+
+        Args:
+            query: The short or informal query.
+
+        Returns:
+            enhanced_query: The rewritten, detailed query string.
+        """
+        SYSTEM = (
+            "You are an expert industrial assistant. Your task is to rewrite short or informal "
+            "user queries into professional, clear, and comprehensive questions suitable for an "
+            "industrial knowledge base search. Do NOT answer the question. Only output the enhanced query text directly."
+        )
+        enhanced = await llm_client.chat(
+            prompt=f"Enhance this query: '{query}'",
+            system=SYSTEM,
+            temperature=0.3
+        )
+        return {"enhanced_query": enhanced.strip('\"\' ')}
+

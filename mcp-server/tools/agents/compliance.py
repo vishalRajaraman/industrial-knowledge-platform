@@ -46,18 +46,18 @@ def register(mcp: FastMCP):
         # Pull related documents from Neo4j
         cypher = """
         MATCH (doc:Document)-[:COMPLIES_WITH]->(reg:Regulation {framework: $reg_id})
-        RETURN doc.id as id, doc.title as title, doc.type as doc_type
+        RETURN doc.filename as doc_id, doc.title as section_title, doc.type as doc_type
         LIMIT 20
         """
         docs = await neo4j_client.run_cypher(cypher, {"reg_id": regulation})
 
         # Also get all documents if no regulation links exist
         if not docs:
-            all_docs_cypher = "MATCH (doc:Document) RETURN doc.id as id, doc.title as title, doc.doc_type as doc_type LIMIT 20"
+            all_docs_cypher = "MATCH (doc:Document) RETURN doc.filename as doc_id, doc.title as section_title, doc.doc_type as doc_type LIMIT 20"
             docs = await neo4j_client.run_cypher(all_docs_cypher)
 
         doc_summary = "\n".join(
-            f"- [{d.get('id', '')}] {d.get('title', '')} ({d.get('doc_type', '')})"
+            f"- [{d.get('doc_id', '')}] {d.get('section_title', '')} ({d.get('doc_type', '')})"
             for d in docs
         ) or "No documents found in knowledge base"
 

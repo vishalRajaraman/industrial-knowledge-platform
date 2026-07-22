@@ -15,18 +15,38 @@ interface Message {
 }
 
 export default function ChatCopilot() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'system',
-      content: 'I am InduStreakAI Copilot. Ask me anything about plant operations, P&IDs, maintenance history, or safety procedures.',
-      confidence: null,
-      sources: []
+  const defaultMessages: Message[] = [{
+    role: 'system',
+    content: 'I am InduStreakAI Copilot. Ask me anything about plant operations, P&IDs, maintenance history, or safety procedures.',
+    confidence: null,
+    sources: []
+  }];
+  const [messages, setMessages] = useState<Message[]>(defaultMessages);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('copilot_history');
+    if (saved) {
+      try {
+        setMessages(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to parse chat history', e);
+      }
     }
-  ]);
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem('copilot_history', JSON.stringify(messages));
+    }
+  }, [messages, isLoaded]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [, startTransition] = useTransition();
+  const [expandedMessageIdx, setExpandedMessageIdx] = useState<number | null>(null);
 
   useEffect(() => {
     const initQ = sessionStorage.getItem('initialQuery');
@@ -43,6 +63,29 @@ export default function ChatCopilot() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  const handleEnhance = async () => {
+    if (!input.trim() || isEnhancing) return;
+    setIsEnhancing(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${apiUrl}/enhance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: input, user_role: 'operator' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enhanced_query) {
+          setInput(data.enhanced_query);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to enhance query:", e);
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -123,7 +166,7 @@ export default function ChatCopilot() {
                   lineHeight: '1.6',
                   whiteSpace: 'pre-wrap'
                 }}>
-                  {msg.content}
+                  {msg.content.replace(/\*\*/g, '').replace(/### /g, '').replace(/#/g, '')}
                 </div>
                 
                 {msg.role === 'assistant' && msg.confidence !== null && (
@@ -133,11 +176,27 @@ export default function ChatCopilot() {
                       Confidence: {(msg.confidence * 100).toFixed(1)}%
                     </span>
                     {msg.sources.length > 0 && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span 
+                        onClick={() => setExpandedMessageIdx(expandedMessageIdx === idx ? null : idx)}
+                        style={{ cursor: 'pointer', fontSize: '0.75rem', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '4px', userSelect: 'none' }}
+                      >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                        {msg.sources.length} Sources cited
+                        {msg.sources.length} Sources cited {expandedMessageIdx === idx ? '▲' : '▼'}
                       </span>
                     )}
+                  </div>
+                )}
+                
+                {msg.role === 'assistant' && expandedMessageIdx === idx && msg.sources.length > 0 && (
+                  <div className="animate-in" style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cited Sources</div>
+                    {msg.sources.map((src, i) => (
+                      <div key={i} style={{ background: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent)' }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-main)', wordBreak: 'break-all' }}>{src.doc_id || 'Document'}</div>
+                        {src.section_title && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', whiteSpace: 'pre-wrap' }}>{src.section_title}</div>}
+                        {src.score && <div style={{ fontSize: '0.7rem', color: 'var(--primary)', marginTop: '0.25rem' }}>Relevance: {(src.score * 100).toFixed(1)}%</div>}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -166,6 +225,18 @@ export default function ChatCopilot() {
               placeholder="Ask about equipment failures, safety procedures, or compliance..." 
               style={{ flex: 1, padding: '1rem 1.5rem', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: 'white', fontSize: '1rem', outline: 'none' }}
             />
+            <button
+                onClick={handleEnhance}
+                title="Enhance Query with Nemotron AI"
+                disabled={isEnhancing || isLoading || !input.trim()}
+                style={{ background: 'rgba(255, 255, 255, 0.1)', color: 'white', padding: '0 1rem', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: isEnhancing || isLoading || !input.trim() ? 0.5 : 1, transition: 'all 0.2s', border: '1px solid rgba(255,255,255,0.2)' }}
+              >
+                {isEnhancing ? (
+                  <span style={{ fontSize: '0.9rem' }}>...</span>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+                )}
+              </button>
             <button 
               onClick={handleSend}
               disabled={isLoading || !input.trim()}

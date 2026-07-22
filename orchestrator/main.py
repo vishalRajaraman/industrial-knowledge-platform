@@ -16,7 +16,7 @@ load_dotenv()
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 from agents.router import RouterAgent
@@ -88,6 +88,13 @@ async def health():
     server_status = await mcp_manager.health_check_all()
     return {"status": "ok", "mcp_servers": server_status}
 
+@app.get("/image")
+async def get_image(path: str):
+    import os
+    if os.path.exists(path):
+        return FileResponse(path)
+    raise HTTPException(status_code=404, detail="Image not found")
+
 
 # ─── Document Upload ─────────────────────────────────────────────────────────────
 @app.post("/upload")
@@ -111,10 +118,10 @@ async def upload_document(
         tool_name = "ingest_pdf" # Default
         if suffix.lower() in ['.xlsx', '.xls', '.csv']:
             tool_name = "ingest_excel"
-        elif doc_type == "pid":
-            tool_name = "ingest_pid"
-        elif doc_type == "drawing":
-            tool_name = "ingest_drawing"
+        elif doc_type == "pid_yolo" or doc_type == "pid":
+            tool_name = "parse_pid"
+        elif doc_type == "layout_drawing" or doc_type == "drawing":
+            tool_name = "digitize_drawing"
             
         result = await mcp_manager.call_tool(
             server="ingestion",
@@ -139,6 +146,22 @@ async def upload_document(
             pass
 
 
+# ─── Query Enhancement ────────────────────────────────────────────────────────────
+@app.post("/enhance")
+async def enhance_query(request: QueryRequest):
+    """Enhance a user query using the nemotron model via MCP."""
+    try:
+        result = await mcp_manager.call_tool(
+            server="copilot",
+            tool_name="enhance_user_query",
+            arguments={"query": request.query}
+        )
+        return {"enhanced_query": result.get("enhanced_query", request.query)}
+    except Exception as e:
+        logger.error(f"Failed to enhance query: {e}")
+        return {"enhanced_query": request.query}
+
+
 # ─── Query ───────────────────────────────────────────────────────────────────────
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest):
@@ -157,7 +180,8 @@ async def query(request: QueryRequest):
         result = await agent.run(request.query, entities, request.user_role)
     elif category == "COMPLIANCE_QUERY":
         agent = ComplianceAgent(mcp_manager)
-        result = await agent.run(request.query, request.regulation)
+        reg = request.regulation or route.get("regulation")
+        result = await agent.run(request.query, reg)
     elif category == "DIRECT_SEARCH":
         # Bypass agents and call the hybrid_search tool directly
         search_result = await mcp_manager.call_tool("knowledge", "hybrid_search", {
@@ -230,7 +254,7 @@ async def graph_query(request: GraphQueryRequest):
 @app.get("/graph/entity/{entity_id}")
 async def graph_entity(entity_id: str, depth: int = 2):
     """Get subgraph around an entity."""
-    result = await mcp_manager.call_tool("storage", "graph_traversal", {
+    result = await mcp_manager.call_tool("storage", "kg_traversal", {
         "node_id": entity_id,
         "depth": depth,
     })
@@ -240,7 +264,7 @@ async def graph_entity(entity_id: str, depth: int = 2):
 @app.get("/graph/stats")
 async def graph_stats():
     """Get knowledge graph statistics."""
-    result = await mcp_manager.call_tool("storage", "graph_query", {
+    result = await mcp_manager.call_tool("storage", "kg_query", {
         "cypher": """
         MATCH (n) 
         WITH labels(n) as lbls, count(n) as cnt
@@ -248,10 +272,40 @@ async def graph_stats():
         ORDER BY cnt DESC
         """
     })
-    edge_count = await mcp_manager.call_tool("storage", "graph_query", {
+    edge_count = await mcp_manager.call_tool("storage", "kg_query", {
         "cypher": "MATCH ()-[r]->() RETURN count(r) as total_edges"
     })
     return {"nodes": result, "edges": edge_count}
+
+@app.get("/graph/all")
+async def graph_all():
+    """Get the entire knowledge graph (limited to 200 relationships to prevent crashing)."""
+    cypher = """
+    MATCH path = (n)-[r]->(m)
+    RETURN 
+        [node in nodes(path) | {id: node.id, labels: labels(node), props: properties(node)}] as nodes,
+        [rel  in relationships(path) | {type: type(rel), from: startNode(rel).id, to: endNode(rel).id}] as rels
+    LIMIT 200
+    """
+    result = await mcp_manager.call_tool("storage", "kg_query", {"cypher": cypher})
+    
+    nodes_seen = {}
+    rels_seen = set()
+    
+    for row in result.get("results", []):
+        for n in row.get("nodes", []):
+            if "id" in n:
+                nodes_seen[n["id"]] = n
+        for r in row.get("rels", []):
+            key = (r["from"], r["type"], r["to"])
+            if key not in rels_seen:
+                rels_seen.add(key)
+                
+    return {
+        "node_id": "All Nodes",
+        "nodes": list(nodes_seen.values()),
+        "relationships": [{"from": r[0], "type": r[1], "to": r[2]} for r in rels_seen]
+    }
 
 
 # ─── WebSocket for real-time updates ─────────────────────────────────────────────

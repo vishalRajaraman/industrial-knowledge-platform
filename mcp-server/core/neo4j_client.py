@@ -36,7 +36,14 @@ def get_driver() -> neo4j.AsyncDriver:
                 "Sign up free at https://neo4j.com/cloud/aura-free/"
             )
         # 30s timeout — enough for AuraDB cold-start/wake-up without hanging forever
-        _driver = AsyncGraphDatabase.driver(_uri, auth=(_user, _pwd), connection_timeout=30.0)
+        # max_connection_lifetime=200 prevents silent TCP drops (OSError 22 / SessionExpired)
+        _driver = AsyncGraphDatabase.driver(
+            _uri, 
+            auth=(_user, _pwd), 
+            connection_timeout=30.0,
+            max_connection_lifetime=200,
+            keep_alive=True
+        )
     return _driver
 
 

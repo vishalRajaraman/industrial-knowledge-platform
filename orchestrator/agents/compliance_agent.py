@@ -18,15 +18,15 @@ class ComplianceAgent:
         # If no explicit regulation was extracted, try to guess from query or ask for clarification
         if not regulation:
             # Fallback to Copilot for general compliance queries if specific reg isn't identified
-            copilot_res = await self.mcp.call_tool("copilot", "expand_query", {"query": query, "user_role": "auditor"})
+            copilot_res = await self.mcp.call_tool("copilot", "expand_query", {"user_query": query, "user_role": "auditor"})
             expanded = copilot_res.get("expanded_query", query)
             
             search_res = await self.mcp.call_tool("copilot", "hybrid_search", {
-                "query": expanded, "entities": ["compliance", "regulation"], "top_k": 5
+                "query": expanded, "equipment_tags": ["compliance", "regulation"], "top_k": 5
             })
             
-            answer_res = await self.mcp.call_tool("copilot", "generate_answer", {
-                "query": query, "context_chunks": search_res.get("results", []), "user_role": "auditor"
+            answer_res = await self.mcp.call_tool("copilot", "rag_answer", {
+                "query": query, "context_chunks": search_res.get("combined_sources", []), "user_role": "auditor"
             })
             
             return {
@@ -66,13 +66,15 @@ class ComplianceAgent:
             answer += f"   - **Current State:** {gap.get('current_state', 'No documentation found')}\n"
             answer += f"   - **Recommendation:** {gap.get('recommendation', 'Address immediately')}\n\n"
             
-        # Audit compilation
-        audit_res = await self.mcp.call_tool("compliance", "comply_compile_audit", {
-            "regulation": regulation
-        })
-        
-        if audit_res.get("package_url"):
-            answer += f"\n[📥 Download complete audit evidence package]({audit_res['package_url']})"
+        # Audit compilation (wrapped in try-catch to prevent Neo4j timeout from crashing response)
+        try:
+            audit_res = await self.mcp.call_tool("compliance", "comply_compile_audit", {
+                "regulation": regulation
+            })
+            if audit_res.get("package_url"):
+                answer += f"\n[📥 Download complete audit evidence package]({audit_res['package_url']})"
+        except Exception as e:
+            logger.error(f"Audit compilation failed: {e}")
             
         return {
             "answer": answer,

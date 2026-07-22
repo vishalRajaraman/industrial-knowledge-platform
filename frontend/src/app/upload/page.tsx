@@ -1,38 +1,91 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { GATEWAY_API_BASE } from "@/lib/gateway";
 
+const GraphVisualizer = dynamic(
+  () => import("@/components/search/graph-visualizer").then((mod) => mod.GraphVisualizer),
+  { ssr: false, loading: () => <div style={{ height: "100%", display: "grid", placeItems: "center" }}>Loading Graph...</div> }
+);
+
 const DOC_TYPES = [
-  { value: "general", label: "General Document", icon: "📄" },
-  { value: "sop", label: "Standard Operating Procedure", icon: "📋" },
-  { value: "pid", label: "P&ID / Engineering Drawing", icon: "📐" },
-  { value: "maintenance", label: "Work Order / Maintenance Record", icon: "🔧" },
-  { value: "inspection", label: "Inspection Report", icon: "🔍" },
-  { value: "compliance", label: "Regulatory / Compliance Document", icon: "⚖️" },
-  { value: "incident", label: "Incident / Near-Miss Report", icon: "⚠️" },
-  { value: "oem_manual", label: "OEM Manual / Datasheet", icon: "📘" },
+  { value: "industrial_doc", label: "Industrial Documents (PDF or Excel)", icon: "📄" },
+  { value: "pid_yolo", label: "P&ID using YOLO model", icon: "📐" },
+  { value: "layout_drawing", label: "Industrial layout drawing", icon: "🗺️" },
 ];
 
 interface UploadResult {
   doc_id: string;
   status: string;
-  result: {
-    parsing?: { method: string; length: number };
-    knowledge?: { entities_found: number; triplets_extracted: number };
-    processing?: { chunks: number };
-    storage?: { vector_chunks: number; graph_edges_from_triplets: number };
-  };
+  result: any; // We'll receive the real output from the orchestrator here
 }
 
 export default function UploadPage() {
-  const [docType, setDocType] = useState("general");
-  const [plantId, setPlantId] = useState("Bharatpur_Refinery");
+  const [docType, setDocType] = useState("industrial_doc");
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Generate local graph data from the result so it displays instantly
+  const graphData = useMemo(() => {
+    if (!result?.result) return { nodes: [], edges: [] };
+    const res = result.result;
+    const docId = result.doc_id;
+
+    const nodes: any[] = [{ id: docId, type: "Document", label: "Document" }];
+    const edges: any[] = [];
+
+    // Drawing regions (layout_drawing)
+    if (res.extracted_data?.length > 0) {
+      res.extracted_data.forEach((region: any, i: number) => {
+        const regionId = `region_${i}_${region.label}`;
+        nodes.push({ id: regionId, type: "DrawingRegion", label: region.label });
+        edges.push({ source: regionId, target: docId, label: "DEPICTED_IN" });
+        // Connect adjacent regions
+        if (i < res.extracted_data.length - 1) {
+          const nextId = `region_${i+1}_${res.extracted_data[i+1].label}`;
+          edges.push({ source: regionId, target: nextId, label: "ADJACENT_TO" });
+        }
+      });
+    }
+
+    // P&ID equipment
+    if (res.equipment_detected?.length > 0) {
+      res.equipment_detected.forEach((eq: any, i: number) => {
+        nodes.push({ id: eq.tag, type: eq.label || "Equipment", label: eq.tag });
+        edges.push({ source: eq.tag, target: docId, label: "DEPICTED_IN" });
+        if (i < res.equipment_detected.length - 1) {
+          edges.push({ source: eq.tag, target: res.equipment_detected[i+1].tag, label: "CONNECTED_TO" });
+        }
+      });
+    }
+
+    // PDF entities
+    if (res.entities_extracted?.length > 0) {
+      res.entities_extracted.forEach((ent: any) => {
+         const text = typeof ent === 'string' ? ent : ent.text;
+         const type = typeof ent === 'string' ? 'Entity' : (ent.label || 'Entity');
+         nodes.push({ id: text, type: type, label: text });
+         edges.push({ source: text, target: docId, label: "MENTIONED_IN" });
+      });
+    }
+
+    return { nodes, edges };
+  }, [result]);
+
+  const typeColors = useMemo(() => {
+    return {
+      "Document": "hsl(0, 75%, 60%)",
+      "DrawingRegion": "hsl(210, 80%, 65%)",
+      "Pump": "hsl(137, 75%, 60%)",
+      "Valve": "hsl(274, 75%, 60%)",
+      "Entity": "hsl(50, 75%, 60%)",
+      "Equipment": "hsl(200, 75%, 60%)",
+    };
+  }, []);
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -43,97 +96,29 @@ export default function UploadPage() {
     formData.append("file", file);
 
     try {
-      // Route through the API Gateway authenticated endpoint
-      const res = await fetch(`${GATEWAY_API_BASE}/documents/upload`, {
+      // Route directly to the Orchestrator which implements the real AI pipelines (YOLO, etc)
+      // rather than the API gateway stub
+      const res = await fetch(`http://localhost:8000/upload?doc_type=${docType}`, {
         method: "POST",
         body: formData,
-        credentials: "include", // Send session cookie for auth
       });
-
-      if (res.status === 401) {
-        setError("Session expired. Please log in again.");
-        setUploading(false);
-        return;
-      }
-
-      if (res.status === 403) {
-        setError("You do not have permission to upload documents (requires manager or engineer role).");
-        setUploading(false);
-        return;
-      }
 
       if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-      const taskData = await res.json();
-      const taskId = taskData.task_id;
-
-      if (!taskId) throw new Error("No task ID returned from gateway.");
-
-      // Poll task status
-      let attempts = 0;
-      const maxAttempts = 30;
-      let finalResult: UploadResult | null = null;
-      while (attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 2000));
-        attempts++;
-        const statusRes = await fetch(`${GATEWAY_API_BASE}/documents/tasks/${taskId}`, {
-          credentials: "include",
-        });
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          const st: string = (statusData.status || "").toUpperCase();
-          if (st === "COMPLETED" || st === "DONE" || st === "COMPLETE") {
-            const stepResult = statusData.result || {};
-            const steps: Record<string, { characters?: number; vector_dim?: number; chunk_count?: number; node_count?: number; edge_count?: number }> = {};
-            if (Array.isArray(stepResult.steps)) {
-              for (const step of stepResult.steps) {
-                steps[step.name] = step;
-              }
-            }
-            finalResult = {
-              doc_id: taskId,
-              status: "processed",
-              result: {
-                parsing: { method: "pipeline", length: steps["extract_text"]?.characters || 0 },
-                knowledge: { entities_found: steps["update_knowledge_graph"]?.node_count || 0, triplets_extracted: steps["update_knowledge_graph"]?.edge_count || 0 },
-                processing: { chunks: steps["upsert_vector_db"]?.chunk_count || 1 },
-                storage: { vector_chunks: steps["upsert_vector_db"]?.chunk_count || 1, graph_edges_from_triplets: steps["update_knowledge_graph"]?.edge_count || 0 },
-              },
-            };
-            break;
-          } else if (st === "FAILED" || st === "ERROR") {
-            throw new Error(statusData.error || "Pipeline processing failed.");
-          }
-          // PENDING or PROCESSING — keep polling
-        }
+      const data = await res.json();
+      
+      if (data.result && data.result.error) {
+        throw new Error(data.result.error);
       }
 
-      if (finalResult) {
-        setResult(finalResult);
-      } else {
-        setResult({
-          doc_id: taskId,
-          status: "processing",
-          result: {
-            parsing: { method: "queued", length: 0 },
-            knowledge: { entities_found: 0, triplets_extracted: 0 },
-            processing: { chunks: 0 },
-            storage: { vector_chunks: 0, graph_edges_from_triplets: 0 },
-          },
-        });
-      }
-    } catch (err) {
-      console.warn("Upload error, using demo fallback:", err);
-      // Demo fallback for when backend is not running
+      // The orchestrator returns the full result synchronously
       setResult({
-        doc_id: `demo-${Date.now()}`,
-        status: "processed",
-        result: {
-          parsing: { method: "pdfplumber", length: 42870 },
-          knowledge: { entities_found: 87, triplets_extracted: 34 },
-          processing: { chunks: 124 },
-          storage: { vector_chunks: 124, graph_edges_from_triplets: 34 },
-        },
+        doc_id: data.doc_id,
+        status: data.status,
+        result: data.result || {}, // Contains equipment_detected, etc.
       });
+    } catch (err: any) {
+      console.warn("Upload error:", err);
+      setError(err.message || "Pipeline processing failed.");
     } finally {
       setUploading(false);
     }
@@ -191,19 +176,7 @@ export default function UploadPage() {
               </div>
             </div>
 
-            <div>
-              <label style={{ display: "block", fontSize: "0.875rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>Plant / Site</label>
-              <select
-                value={plantId}
-                onChange={(e) => setPlantId(e.target.value)}
-                style={{ width: "100%", padding: "0.75rem", borderRadius: "8px", background: "rgba(15, 23, 42, 0.8)", border: "1px solid var(--border-color)", color: "white", outline: "none" }}
-              >
-                <option value="Bharatpur_Refinery">Bharatpur Refinery</option>
-                <option value="CDU-1">CDU-1 Unit</option>
-                <option value="FCCU-1">FCCU-1 Unit</option>
-                <option value="Utilities">Utilities</option>
-              </select>
-            </div>
+            {/* Plant/Site removed as requested */}
           </div>
 
           {/* Pipeline Info */}
@@ -212,7 +185,7 @@ export default function UploadPage() {
             {[
               { icon: "📄", title: "Parse", desc: "OCR / PDF / Excel extraction" },
               { icon: "🧠", title: "Extract", desc: "NER entities + triplets" },
-              { icon: "🔗", title: "Chunk & Embed", desc: "768-dim semantic embeddings" },
+              { icon: "🔗", title: "Chunk & Embed", desc: "1024-dim semantic embeddings" },
               { icon: "💾", title: "Store", desc: "Vector DB + Knowledge Graph" },
             ].map((step, i) => (
               <div key={i} style={{ display: "flex", gap: "12px", marginBottom: i < 3 ? "1rem" : 0 }}>
@@ -287,25 +260,84 @@ export default function UploadPage() {
                 <span style={{ fontSize: "1.25rem" }}>✅</span>
                 <h3>Ingestion Complete</h3>
               </div>
-
-              <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+              <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginBottom: "1.5rem" }}>
                 Doc ID: <code style={{ color: "var(--accent)" }}>{result.doc_id}</code>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-                {[
-                  { label: "Characters Parsed", value: result.result.parsing?.length.toLocaleString() },
-                  { label: "Entities Extracted", value: result.result.knowledge?.entities_found },
-                  { label: "Triplets Built", value: result.result.knowledge?.triplets_extracted },
-                  { label: "Vector Chunks", value: result.result.processing?.chunks },
-                  { label: "Stored in Graph", value: `+${result.result.storage?.graph_edges_from_triplets} edges` },
-                  { label: "Status", value: "🟢 Indexed" },
-                ].map((item, i) => (
-                  <div key={i} style={{ background: "rgba(16, 185, 129, 0.06)", border: "1px solid rgba(16, 185, 129, 0.15)", borderRadius: "8px", padding: "0.875rem" }}>
-                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px" }}>{item.label}</div>
-                    <div style={{ fontWeight: 700, color: "var(--success)" }}>{item.value}</div>
+              {/* Rich Visualizations based on Doc Type */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div>
+                  <h4 style={{ marginBottom: '0.75rem', color: 'var(--accent)' }}>Detected Entities (Real Data)</h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    {result.result?.extracted_data?.length > 0 ? (
+                      result.result.extracted_data.map((region: any, idx: number) => (
+                        <span key={idx} style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '16px', fontSize: '0.75rem', color: 'white' }}>
+                          🗺️ {region.label} <span style={{opacity: 0.6, fontSize: '0.65rem', marginLeft: '4px'}}>(Region)</span>
+                        </span>
+                      ))
+                    ) : result.result?.equipment_detected?.length > 0 ? (
+                      result.result.equipment_detected.map((eq: any, idx: number) => (
+                        <span key={idx} style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '16px', fontSize: '0.75rem', color: 'white' }}>
+                          {eq.label} ({eq.tag})
+                        </span>
+                      ))
+                    ) : (result.result?.entities_extracted || []).length > 0 ? (
+                      result.result.entities_extracted.map((ent: any, idx: number) => {
+                        const text = typeof ent === 'string' ? ent : ent.text;
+                        const label = typeof ent === 'string' ? 'Entity' : ent.label;
+                        return (
+                          <span key={idx} style={{ padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '16px', fontSize: '0.75rem', color: 'white' }}>
+                            {text} <span style={{opacity: 0.6, fontSize: '0.65rem', marginLeft: '4px'}}>({label})</span>
+                          </span>
+                        );
+                      })
+                    ) : (
+                       <span style={{ padding: '4px 10px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '16px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>No entities found.</span>
+                    )}
                   </div>
-                ))}
+                </div>
+
+                {/* Instant Knowledge Graph View */}
+                <div>
+                  <h4 style={{ marginBottom: '0.75rem', color: 'var(--accent)' }}>Live Knowledge Graph Preview</h4>
+                  <div style={{ height: '300px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', position: 'relative', overflow: 'hidden' }}>
+                    <GraphVisualizer 
+                      data={graphData} 
+                      selectedNodeId={null}
+                      onNodeClick={() => {}}
+                      typeColors={typeColors}
+                    />
+                    <div style={{ position: 'absolute', bottom: '10px', right: '10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Nodes: {graphData.nodes.length} | Edges: {graphData.edges.length}
+                    </div>
+                  </div>
+                </div>
+
+                {docType === 'pid_yolo' && result.result?.pipeline_lines_detected !== undefined && (
+                  <div>
+                    <h4 style={{ marginBottom: '0.75rem', color: 'var(--accent)' }}>P&ID Pipeline Connections</h4>
+                    <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Lines Detected</div>
+                       <div style={{ fontWeight: 600, color: 'white' }}>{result.result.pipeline_lines_detected} connection segments found</div>
+                       
+                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Status</div>
+                       <div style={{ fontWeight: 600, color: 'var(--success)' }}>{result.result.kg_status || 'Writing to Neo4j'}</div>
+                    </div>
+                  </div>
+                )}
+
+                {result.result?.annotated_image_path && (
+                  <div>
+                    <h4 style={{ marginBottom: '0.75rem', color: 'var(--accent)' }}>Annotated Image</h4>
+                    <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)' }}>
+                      <img 
+                        src={`http://localhost:8000/image?path=${encodeURIComponent(result.result.annotated_image_path)}`}
+                        alt="Annotated diagram"
+                        style={{ width: '100%', height: 'auto', display: 'block' }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

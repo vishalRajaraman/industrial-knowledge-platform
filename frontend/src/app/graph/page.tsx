@@ -10,17 +10,7 @@ const GraphVisualizer = dynamic(
   { ssr: false, loading: () => <div className="glass-panel" style={{ height: "100%", display: "grid", placeItems: "center", color: "var(--text-muted)" }}>Loading Graph Engine...</div> }
 );
 
-// No demo nodes/edges. We rely strictly on the live Neo4j database.
-const TYPE_COLORS: Record<string, string> = {
-  Pump: "#2563eb",
-  Column: "#7c3aed",
-  Unit: "#0891b2",
-  Document: "#16a34a",
-  Failure: "#ef4444",
-  RootCause: "#f59e0b",
-  Regulation: "#0d9488",
-  Entity: "#6b7280",
-};
+// Dynamic colors are now generated per-type when the graph loads
 
 interface GraphNode {
   id: string;
@@ -40,22 +30,23 @@ interface GraphEdge {
 }
 
 export default function GraphPage() {
-  const [searchEntity, setSearchEntity] = useState("P-2003A");
+  const [searchEntity, setSearchEntity] = useState("");
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [typeColors, setTypeColors] = useState<Record<string, string>>({});
   
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({ nodes: [], edges: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchGraph = useCallback(async (query: string) => {
-    if (!query.trim()) return;
     setLoading(true);
     setError(null);
     setSelectedNode(null);
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/graph/entity/${encodeURIComponent(query.trim())}?depth=2`, {
+      const endpoint = query.trim() ? `/graph/entity/${encodeURIComponent(query.trim())}?depth=2` : `/graph/all`;
+      const response = await fetch(`${apiUrl}${endpoint}`, {
         method: "GET",
         headers: { "Content-Type": "application/json" }
       });
@@ -65,7 +56,11 @@ export default function GraphPage() {
       const data = await response.json();
       
       // Map Neo4j orchestrator response
-      const nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      // Nodes from FastMCP neo4j client have {id, labels, props}. Map labels[0] to type.
+      const nodes = Array.isArray(data?.nodes) ? data.nodes.map((n: any) => ({
+        ...n,
+        type: n.labels && n.labels.length > 0 ? n.labels[0] : "Entity"
+      })) : [];
       const edges = Array.isArray(data?.relationships) ? data.relationships.map((r: { from: string; to: string; type: string }) => ({
         source: r.from,
         target: r.to,
@@ -74,9 +69,18 @@ export default function GraphPage() {
       
       if (nodes.length > 0) {
         setGraphData({ nodes, edges });
+        
+        // Dynamically assign colors to unique types
+        const uniqueTypes = Array.from(new Set(nodes.map((n: GraphNode) => n.type || "Entity")));
+        const newColors: Record<string, string> = {};
+        uniqueTypes.forEach((type, idx) => {
+          // Golden angle approximation for evenly distributed vibrant colors
+          newColors[type as string] = `hsl(${(idx * 137.508) % 360}, 75%, 60%)`;
+        });
+        setTypeColors(newColors);
       } else {
         setGraphData({ nodes: [], edges: [] });
-        setError("No nodes found for this entity.");
+        setError("No nodes found for this query.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load graph");
@@ -94,7 +98,7 @@ export default function GraphPage() {
   }, []);
 
   return (
-    <ProtectedRoute allowedRoles={["manager", "engineer"]}>
+    <ProtectedRoute allowedRoles={["plant admin"]}>
       <div className="animate-in" style={{ height: "calc(100vh - 140px)", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
           <div>
@@ -131,9 +135,9 @@ export default function GraphPage() {
           {/* Graph Canvas */}
           <div className="glass-panel" style={{ position: "relative", overflow: "hidden", background: "#050816" }}>
             {/* Legend */}
-            <div style={{ position: "absolute", top: "1rem", left: "1rem", display: "flex", flexDirection: "column", gap: "6px", zIndex: 10, background: "rgba(15,23,42,0.6)", padding: "1rem", borderRadius: "12px", backdropFilter: "blur(8px)" }}>
+            <div style={{ position: "absolute", top: "1rem", left: "1rem", display: "flex", flexDirection: "column", gap: "6px", zIndex: 10, background: "rgba(15,23,42,0.6)", padding: "1rem", borderRadius: "12px", backdropFilter: "blur(8px)", maxHeight: "calc(100% - 2rem)", overflowY: "auto" }}>
               <div style={{ fontSize: "0.75rem", fontWeight: "bold", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "white" }}>Legend</div>
-              {Object.entries(TYPE_COLORS).slice(0, 7).map(([type, color]) => (
+              {Object.entries(typeColors).map(([type, color]) => (
                 <div key={type} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <div style={{ width: "12px", height: "12px", borderRadius: "50%", background: color }} />
                   <span style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.85)" }}>{type}</span>
@@ -144,7 +148,8 @@ export default function GraphPage() {
             <GraphVisualizer 
               data={graphData} 
               selectedNodeId={selectedNode?.id || null}
-              onNodeClick={setSelectedNode} 
+              onNodeClick={setSelectedNode}
+              typeColors={typeColors}
             />
           </div>
 
@@ -156,8 +161,8 @@ export default function GraphPage() {
                   <div
                     style={{
                       width: "48px", height: "48px", borderRadius: "12px",
-                      background: `${TYPE_COLORS[selectedNode.type ?? "Entity"] || "#6b7280"}22`,
-                      border: `1px solid ${TYPE_COLORS[selectedNode.type ?? "Entity"] || "#6b7280"}`,
+                      background: `${typeColors[selectedNode.type ?? "Entity"] || "#6b7280"}22`,
+                      border: `1px solid ${typeColors[selectedNode.type ?? "Entity"] || "#6b7280"}`,
                       display: "flex", alignItems: "center", justifyContent: "center",
                       marginBottom: "12px",
                     }}
@@ -167,7 +172,7 @@ export default function GraphPage() {
                     </span>
                   </div>
                   <h3 style={{ fontSize: "1.25rem", marginBottom: "4px" }}>{selectedNode.id}</h3>
-                  <span style={{ fontSize: "0.875rem", color: TYPE_COLORS[selectedNode.type ?? "Entity"] || "var(--text-muted)" }}>
+                  <span style={{ fontSize: "0.875rem", color: typeColors[selectedNode.type ?? "Entity"] || "var(--text-muted)" }}>
                     {selectedNode.type}
                   </span>
                 </div>

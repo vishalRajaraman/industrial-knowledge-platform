@@ -34,6 +34,8 @@ def _get_client() -> AsyncOpenAI:
         _client = AsyncOpenAI(
             base_url=NVIDIA_BASE_URL,
             api_key=NVIDIA_API_KEY,
+            max_retries=1,
+            timeout=30.0,
         )
     return _client
 
@@ -44,6 +46,7 @@ async def chat(
     prompt: str,
     system: str = "",
     temperature: float | None = None,
+    model: str | None = None,
 ) -> str:
     """
     Send a prompt to GLM-5.2 and return the full response text.
@@ -52,6 +55,7 @@ async def chat(
         prompt:      The user message / query.
         system:      Optional system instruction to set model behaviour.
         temperature: Override default temperature (0.4) if needed.
+        model:       Optional model string to override the default.
 
     Returns:
         The model's response as a plain string.
@@ -68,7 +72,7 @@ async def chat(
 
     try:
         completion = await client.chat.completions.create(
-            model=LLM_MODEL,
+            model=model or LLM_MODEL,
             messages=messages,
             temperature=temperature if temperature is not None else LLM_TEMPERATURE,
             top_p=LLM_TOP_P,

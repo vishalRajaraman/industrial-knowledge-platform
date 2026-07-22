@@ -3,16 +3,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 
-const TYPE_COLORS: Record<string, string> = {
-  Pump: "#2563eb",
-  Column: "#7c3aed",
-  Unit: "#0891b2",
-  Document: "#16a34a",
-  Failure: "#ef4444",
-  RootCause: "#f59e0b",
-  Regulation: "#0d9488",
-  Entity: "#6b7280",
-};
+// TYPE_COLORS is now passed as a prop from the parent to support dynamic legends.
 
 interface NodeData {
   id: string;
@@ -41,10 +32,12 @@ export function GraphVisualizer({
   data,
   onNodeClick,
   selectedNodeId,
+  typeColors,
 }: {
   data: GraphData;
   onNodeClick: (node: NodeData | null) => void;
   selectedNodeId: string | null;
+  typeColors: Record<string, string>;
 }) {
   // ForceGraph2D ref — use a generic mutable ref to avoid type conflicts with the library
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,7 +72,7 @@ export function GraphVisualizer({
             links: data.edges.map(e => ({ ...e, source: e.source, target: e.target })),
           }}
           nodeRelSize={6}
-          nodeColor={(node: NodeData) => TYPE_COLORS[node.type || "Entity"] || "#6b7280"}
+          nodeColor={(node: NodeData) => typeColors[node.type || "Entity"] || "#6b7280"}
           nodeVal={(node: NodeData) => (node.id === selectedNodeId ? 12 : (node.val ?? 6))}
           linkColor={() => "rgba(148, 163, 184, 0.25)"}
           linkDirectionalArrowLength={3.5}
@@ -91,7 +84,7 @@ export function GraphVisualizer({
             const fontSize = 12 / globalScale;
             ctx.font = `${fontSize}px Inter, sans-serif`;
 
-            const color = TYPE_COLORS[node.type || "Entity"] || "#6b7280";
+            const color = typeColors[node.type || "Entity"] || "#6b7280";
             const isSelected = node.id === selectedNodeId;
 
             ctx.beginPath();

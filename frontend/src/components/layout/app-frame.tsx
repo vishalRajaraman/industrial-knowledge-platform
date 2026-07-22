@@ -16,6 +16,12 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
     if (pathname === "/login") return;
     if (!session) {
       router.replace("/login");
+      return;
+    }
+
+    // RBAC: Engineers cannot access restricted pages
+    if (session.role === "engineer" && (pathname.startsWith("/upload") || pathname.startsWith("/graph"))) {
+      router.replace("/");
     }
   }, [pathname, ready, router, session]);
 
@@ -49,9 +55,10 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
   const navItems = [
     { href: "/", label: "Dashboard", icon: "▦" },
     { href: "/chat", label: "Ask Copilot", icon: "✦" },
-    { href: "/graph", label: "Knowledge Graph", icon: "⟐" },
-    { href: "/compliance", label: "Compliance Audit", icon: "⚠" },
-    { href: "/upload", label: "Ingest Data", icon: "⇪" },
+    ...(session?.role === "plant admin" ? [
+      { href: "/graph", label: "Knowledge Graph", icon: "⟐" },
+      { href: "/upload", label: "Ingest Data", icon: "⇪" },
+    ] : []),
   ];
 
   return (
@@ -63,7 +70,7 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
           </div>
-          <span>IKP Brain</span>
+          <span>Industrial Knowledge Platform</span>
         </div>
 
         <nav className="nav-links">
@@ -103,10 +110,6 @@ export function AppFrame({ children }: { children: React.ReactNode }) {
       <main className="main-content">
         <header className="topbar">
           <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>
-            Bharatpur Refinery <span style={{ color: "var(--text-muted)", fontSize: "1rem", fontWeight: 400, margin: "0 8px" }}>/</span>
-            <button className="btn-secondary" onClick={() => router.push("/")} style={{ marginLeft: "0.75rem", padding: "0.5rem 0.8rem" }}>
-              Dashboard
-            </button>
           </div>
           <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
             <div className="btn-secondary" style={{ padding: "0.5rem 1rem", display: "flex", alignItems: "center", gap: "8px" }}>

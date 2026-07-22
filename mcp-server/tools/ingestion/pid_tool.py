@@ -57,12 +57,8 @@ def _load_yolo_model_sync():
             logger.warning("YOLO model pre-warm failed: %s", e)
 
 
-# Load the YOLO model synchronously at server startup (runs once when server.py imports this module).
-# This takes ~14 seconds but guarantees the model is ready before ANY tool call arrives.
-# A background thread created a race condition: if the tool was called during loading,
-# it would block in the thread pool for up to 14s and risk the MCP client timeout.
-if YOLO_MODEL_PATH and os.path.exists(YOLO_MODEL_PATH):
-    _load_yolo_model_sync()
+# The YOLO model is loaded lazily on the first tool call to prevent blocking server startup for 15 seconds.
+# The MCP client has a 120s timeout, so the 15s delay on the first call is perfectly safe.
 
 
 def register(mcp: FastMCP):

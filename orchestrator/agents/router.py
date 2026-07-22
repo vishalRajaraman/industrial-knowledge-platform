@@ -29,6 +29,20 @@ class RouterAgent:
             logger.warning("NVIDIA_API_KEY not set. Defaulting to KNOWLEDGE_QUERY.")
             return {"category": "KNOWLEDGE_QUERY", "entities_detected": []}
 
+        # Fast path for compliance queries to avoid LLM rate limits/timeouts
+        if "compliance" in query.lower() or "audit" in query.lower():
+            reg = "All Frameworks"
+            q_lower = query.lower()
+            if "factory act" in q_lower:
+                reg = "Factory_Act_1948"
+            elif "oisd" in q_lower and "144" in q_lower:
+                reg = "OISD_STD_144"
+            elif "oisd" in q_lower and "154" in q_lower:
+                reg = "OISD_154"
+            elif "iso" in q_lower:
+                reg = "ISO_55001"
+            return {"category": "COMPLIANCE_QUERY", "entities_detected": [], "regulation": reg}
+
         system_prompt = (
             "You are a routing agent for an industrial plant intelligence platform. "
             "Analyze the user's query and classify it into exactly one of these categories: "
@@ -56,7 +70,7 @@ class RouterAgent:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(f"{NVIDIA_BASE_URL}/chat/completions", headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
